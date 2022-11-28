@@ -39,6 +39,18 @@ def kalman_filters_with_pykalman():
         KalmanFilter(trans_mat, trans_cov, obs_mat, obs_cov)
     )
 
+    trans_mat = np.eye(1, 5)
+    trans_mat = np.concatenate((trans_mat, np.eye(4, 5)))
+    trans_cov = 0.1 * trans_mat
+
+    obs_mat = np.ones(trans_mat.shape[-1]).cumsum()[::-1]
+    obs_mat /= obs_mat.sum()
+    
+    yield (
+        pk.KalmanFilter(transition_covariance=trans_cov, transition_matrices=trans_mat, observation_covariance=obs_cov, observation_matrices=obs_mat),
+        KalmanFilter(trans_mat, trans_cov, obs_mat, obs_cov) 
+    )
+
 
 class TestKalman(object):
     # TODO: Figure out a better eps
