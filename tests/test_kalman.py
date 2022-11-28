@@ -70,27 +70,25 @@ class TestKalman(object):
         assert c.covariance.shape == (shape[0], shape[0])
 
     @pt.mark.parametrize("pykf_kf", kalman_filters_with_pykalman())
-    @pt.mark.parametrize("replicas", [1, 10, 50])
+    @pt.mark.parametrize("replicas", [1, 10, 5_000])
     def test_compare_with_pykalman(self, pykf_kf, replicas):
         pykf, kf = pykf_kf
 
-        _, y_ = pykf.sample(100)
+        y = list()
+        m = list()
+        c = list()
 
-        y = np.stack(replicas * (y_,), axis=1).squeeze(1)
+        for i in range(replicas):
+            _, y_ = pykf.sample(100)    
+            m_, c_ = pykf.filter(y_)
 
-        m = np.empty((y.shape[0], replicas, y.shape[-1]))
-        c = np.empty(((y.shape[0], replicas, y.shape[-1], y.shape[-1])))
-        
-        m_, c_ = pykf.filter(y_)
-        # TODO: Use repeat...
+            y.append(y_)
+            m.append(m_)
+            c.append(c_)
 
-        if replicas > 1:
-            for i in range(replicas):            
-                m[:, i] = m_
-                c[:, i] = c_
-        else:
-            m = m_
-            c = c_
+        y = np.stack(y, axis=1)
+        m = np.stack(m, axis=1)
+        c = np.stack(c, axis=1)
 
         jax_result = kf.filter(y)
         m_jax = jax_result.filtered_means()
