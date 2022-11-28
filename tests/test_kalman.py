@@ -42,4 +42,6 @@ class TestKalman(object):
         p = kf.predict(c)
         
         c = kf.correct(jnp.ones((*batch_shape, shape[-1])), p)
- 
+
+        assert c.mean.shape == (*batch_shape, shape[0])
+        assert c.covariance.shape == (shape[0], shape[0])
