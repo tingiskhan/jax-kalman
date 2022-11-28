@@ -3,6 +3,7 @@ from jaxman import KalmanFilter
 import pytest as pt
 import pykalman as pk
 import numpy as np
+import jax.random as jxrnd
 
 
 def error(y_true, y_hat):
@@ -82,23 +83,20 @@ class TestKalman(object):
         assert c.covariance.shape == (shape[0], shape[0])
 
     @pt.mark.parametrize("pykf_kf", kalman_filters_with_pykalman())
-    @pt.mark.parametrize("replicas", [1, 10, 5_000])
+    @pt.mark.parametrize("replicas", [1, 10, 1_000])
     def test_compare_with_pykalman(self, pykf_kf, replicas):
         pykf, kf = pykf_kf
 
-        y = list()
         m = list()
         c = list()
 
-        for _ in range(replicas):
-            _, y_ = pykf.sample(100)    
-            m_, c_ = pykf.filter(y_)
+        _, y = kf.sample(100, jxrnd.PRNGKey(123), (replicas,))
+        for i in range(replicas):            
+            m_, c_ = pykf.filter(y[:, i])
 
-            y.append(y_)
             m.append(m_)
             c.append(c_)
 
-        y = np.stack(y, axis=1)
         m = np.stack(m, axis=1)
         c = np.stack(c, axis=1)
 
