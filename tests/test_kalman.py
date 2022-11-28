@@ -33,12 +33,13 @@ class TestKalman(object):
         assert kf.obs_mat.shape == (exp[1], exp[0])
 
     @pt.mark.parametrize("conf_and_expected", kalman_configurations())
-    def test_predict_correct(self, conf_and_expected):
+    @pt.mark.parametrize("batch_shape", [(), (100,), (1_000,)])
+    def test_predict_correct(self, conf_and_expected, batch_shape):
         conf, shape = conf_and_expected
         kf = KalmanFilter(*conf)
 
         c = kf.initialize()
         p = kf.predict(c)
         
-        c = kf.correct(jnp.ones_like(shape[-1]), p)
+        c = kf.correct(jnp.ones((*batch_shape, shape[-1])), p)
  
