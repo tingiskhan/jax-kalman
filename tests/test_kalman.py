@@ -78,7 +78,7 @@ class TestKalman(object):
         m = list()
         c = list()
 
-        for i in range(replicas):
+        for _ in range(replicas):
             _, y_ = pykf.sample(100)    
             m_, c_ = pykf.filter(y_)
 
