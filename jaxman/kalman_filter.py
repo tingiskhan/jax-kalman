@@ -1,5 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
+from typing import Tuple
+import jax.random as jrnd
 
 
 from .typing import ArrayLike
@@ -120,3 +122,29 @@ class KalmanFilter(object):
             result.append(p, c)
         
         return result
+
+    def sample(self, timesteps: int, prng_key: jrnd.PRNGKey, batch_shape: tuple = None) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        Samples
+
+        Args:
+            timesteps (int): _description_
+            batch_shape (tuple): _description_
+
+        Returns:
+            Tuple[jnp.ndarray, jnp.ndarray]: _description_
+        """
+
+        x = jrnd.multivariate_normal(prng_key, self.init_mean, self.init_cov, batch_shape)
+
+        x_res = (x,)
+        y_res = tuple()
+
+        for t in range(timesteps):
+            x = jrnd.multivariate_normal(prng_key, (self.trans_mat @ x[..., None]).squeeze(-1), self.trans_cov, method="svd")
+            y = jrnd.multivariate_normal(prng_key, (self.obs_mat @ x[..., None]).squeeze(-1), self.obs_cov, method="svd") 
+
+            x_res += (x,)
+            y_res += (y,)
+        
+        return jnp.stack(x_res)[1:], jnp.stack(y_res)
