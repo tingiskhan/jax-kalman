@@ -2,10 +2,11 @@ import jax.numpy as jnp
 from jaxman import KalmanFilter
 import pytest as pt
 import pykalman as pk
+import numpy as np
 
 
 def error(y_true, y_hat):
-    return (jnp.abs(y_true - y_hat) / y_true).mean()
+    return jnp.abs((y_true - y_hat) / y_true).mean()
 
 
 
@@ -69,12 +70,27 @@ class TestKalman(object):
         assert c.covariance.shape == (shape[0], shape[0])
 
     @pt.mark.parametrize("pykf_kf", kalman_filters_with_pykalman())
-    def test_compare_with_pykalman(self, pykf_kf):
+    @pt.mark.parametrize("replicas", [1, 10, 50])
+    def test_compare_with_pykalman(self, pykf_kf, replicas):
         pykf, kf = pykf_kf
 
-        _, y = pykf.sample(100)
+        _, y_ = pykf.sample(100)
 
-        m, c = pykf.filter(y)
+        y = np.stack(replicas * (y_,), axis=1).squeeze(1)
+
+        m = np.empty((y.shape[0], replicas, y.shape[-1]))
+        c = np.empty(((y.shape[0], replicas, y.shape[-1], y.shape[-1])))
+        
+        m_, c_ = pykf.filter(y_)
+        # TODO: Use repeat...
+
+        if replicas > 1:
+            for i in range(replicas):            
+                m[:, i] = m_
+                c[:, i] = c_
+        else:
+            m = m_
+            c = c_
 
         jax_result = kf.filter(y)
         m_jax = jax_result.filtered_means()

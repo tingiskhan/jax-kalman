@@ -71,7 +71,7 @@ def predict(x: jnp.ndarray, p: jnp.ndarray, f: jnp.ndarray, q: jnp.ndarray):
         Tuple[jnp.ndarray, jnp.ndarray]: mean and covariance.
     """
 
-    mean = f @ x
+    mean = (f @ x[..., None]).squeeze(-1)
     cov = f @ p @ f.transpose(-1, -2) + q
 
     return mean, cov
@@ -90,7 +90,7 @@ def correct(x: jnp.ndarray, h: jnp.ndarray, p: jnp.ndarray, r: jnp.ndarray, y: j
         y (jnp.ndarray): observation.
     """
 
-    z_pred = y - h @ x
+    z_pred = y - (h @ x[..., None]).squeeze(-1)
     
     h_transpose = h.transpose(-1, -2)
     s_pred = h @ p @ h_transpose + r
