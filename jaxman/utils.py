@@ -102,7 +102,7 @@ def correct(x: jnp.ndarray, h: jnp.ndarray, p: jnp.ndarray, r: jnp.ndarray, y: j
     if y.ndim <= 1:
         x_corr = x + gain @ z_pred
     else:
-        x_corr = x + (gain @ z_pred[..., None]).squeeze()
+        x_corr = x + (gain @ z_pred[..., None]).squeeze(-1)
 
     p_corr = (jnp.eye(x.shape[-1]) - gain @ h) @ p
 
