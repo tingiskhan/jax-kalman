@@ -1,6 +1,12 @@
 import jax.numpy as jnp
 from jaxman import KalmanFilter
 import pytest as pt
+import pykalman as pk
+
+
+def error(y_true, y_hat):
+    return (jnp.abs(y_true - y_hat) / y_true).mean()
+
 
 
 def kalman_configurations():
@@ -20,7 +26,23 @@ def kalman_configurations():
     )
 
 
+def kalman_filters_with_pykalman():
+    trans_mat = 1.0
+    obs_mat = 1.0
+
+    trans_cov = 0.1
+    obs_cov = 0.1
+    
+    yield (
+        pk.KalmanFilter(transition_covariance=trans_cov, transition_matrices=trans_mat, observation_covariance=obs_cov, observation_matrices=obs_mat),
+        KalmanFilter(trans_mat, trans_cov, obs_mat, obs_cov)
+    )
+
+
 class TestKalman(object):
+    # TODO: Figure out a better eps
+    EPS = 1e-3
+
     @pt.mark.parametrize("conf_and_expected", kalman_configurations())
     def test_initializer(self, conf_and_expected):
         conf, exp = conf_and_expected
@@ -45,3 +67,20 @@ class TestKalman(object):
 
         assert c.mean.shape == (*batch_shape, shape[0])
         assert c.covariance.shape == (shape[0], shape[0])
+
+    @pt.mark.parametrize("pykf_kf", kalman_filters_with_pykalman())
+    def test_compare_with_pykalman(self, pykf_kf):
+        pykf, kf = pykf_kf
+
+        _, y = pykf.sample(100)
+
+        m, c = pykf.filter(y)
+
+        jax_result = kf.filter(y)
+        m_jax = jax_result.filtered_means()
+        c_jax = jax_result.filtered_covariances()
+
+        m_error = error(m, m_jax)
+        c_error = error(c, c_jax)
+        
+        assert m_error < self.EPS and c_error < self.EPS
