@@ -1,5 +1,7 @@
 from typing import Sequence, Tuple
 import jax.numpy as jnp
+import jax
+from functools import partial
 
 from .typing import ArrayLike
 from .result import Correction
@@ -34,7 +36,7 @@ def coerce_covariance(cov: jnp.ndarray) -> jnp.ndarray:
     
     return cov * jnp.eye(dim)
 
-
+@partial(jax.jit, static_argnums=(1, 2))
 def coerce_matrix(a: jnp.ndarray, left_dim: int, right_dim: int) -> jnp.ndarray:
     """
     Coerces the transition/observation matrix.
@@ -54,6 +56,7 @@ def coerce_matrix(a: jnp.ndarray, left_dim: int, right_dim: int) -> jnp.ndarray:
     return jnp.ones(shape) * a
 
 
+@jax.jit
 def predict(x: jnp.ndarray, p: jnp.ndarray, f: jnp.ndarray, q: jnp.ndarray):
     """
     Predicts the mean and covariance, see [here](https://en.wikipedia.org/wiki/Kalman_filter)
@@ -74,6 +77,7 @@ def predict(x: jnp.ndarray, p: jnp.ndarray, f: jnp.ndarray, q: jnp.ndarray):
     return mean, cov
 
 
+@jax.jit
 def correct(x: jnp.ndarray, h: jnp.ndarray, p: jnp.ndarray, r: jnp.ndarray, y: jnp.ndarray):
     """
     Corrects the Kalman step, see [here](https://en.wikipedia.org/wiki/Kalman_filter).
