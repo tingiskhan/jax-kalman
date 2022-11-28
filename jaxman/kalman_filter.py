@@ -4,7 +4,7 @@ import numpy as np
 
 from .typing import ArrayLike
 from .utils import to_array, coerce_covariance, coerce_matrix, predict, correct
-from .result import Correction, Prediction
+from .result import Correction, Prediction, Result
 
 
 class KalmanFilter(object):
@@ -96,3 +96,27 @@ class KalmanFilter(object):
 
         # TODO: Fix log-likelihood
         return Correction(mean, cov, gain, 0.0)
+
+    def filter(self, y: jnp.ndarray) -> Result:
+        """
+        Filters the data `y`.
+
+        Args:
+            y (jnp.ndarray): data to filter, must be of shape `{time, [batch], [dim]}`
+
+        Returns:
+            Result: result object.
+        """
+
+        c = self.initialize()
+        result = Result()
+
+        result.append(None, c)
+
+        for yt in y:
+            p = self.predict(c)
+            c = self.correct(yt, p)
+
+            result.append(p, c)
+        
+        return result
