@@ -54,7 +54,7 @@ def kalman_filters_with_pykalman():
 
 
 class TestKalman(object):
-    # TODO: Figure out a better eps
+    # TODO: Figure out a better eps.
     EPS = 1e-3
 
     @pt.mark.parametrize("conf_and_expected", kalman_configurations())
@@ -83,7 +83,7 @@ class TestKalman(object):
         assert c.covariance.shape == (shape[0], shape[0])
 
     @pt.mark.parametrize("pykf_kf", kalman_filters_with_pykalman())
-    @pt.mark.parametrize("replicas", [1, 10, 1_000])
+    @pt.mark.parametrize("replicas", [1, 10, 100])
     def test_compare_with_pykalman(self, pykf_kf, replicas):
         pykf, kf = pykf_kf
 
@@ -103,7 +103,10 @@ class TestKalman(object):
         jax_result = kf.filter(y)
         m_jax, c_jax = jax_result.filtered()
 
-        m_error = error(m, m_jax)
-        c_error = error(c, c_jax)
+        # NB: We only compare the last 50% of the series as the approach is somewhat different.
+        ind = int(y.shape[0] * 0.5)
+
+        m_error = error(m[ind:], m_jax[ind:])
+        c_error = error(c[ind:], c_jax[ind:])
         
         assert m_error < self.EPS and c_error < self.EPS
