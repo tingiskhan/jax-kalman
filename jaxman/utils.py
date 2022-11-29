@@ -102,4 +102,4 @@ def correct(x: jnp.ndarray, h: jnp.ndarray, p: jnp.ndarray, r: jnp.ndarray, y: j
     x_corr = x + (gain @ z_pred[..., None]).squeeze(-1)
     p_corr = (jnp.eye(x.shape[-1]) - gain @ h) @ p
 
-    return x_corr, p_corr, gain
+    return x_corr, jnp.broadcast_to(p_corr, x_corr.shape + p_corr.shape[-1:]), gain
