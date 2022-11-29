@@ -36,6 +36,7 @@ def coerce_covariance(cov: jnp.ndarray) -> jnp.ndarray:
     
     return cov * jnp.eye(dim)
 
+
 @partial(jax.jit, static_argnums=(1, 2))
 def coerce_matrix(a: jnp.ndarray, left_dim: int, right_dim: int) -> jnp.ndarray:
     """
