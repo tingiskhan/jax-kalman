@@ -14,11 +14,12 @@ https://github.com/tingiskhan/jaxman
 ```
 
 # Usage
-The API is inspired by pykalman's. A trivial random walk example would be
+The API is inspired by pykalman's. A trivial random walk example follows below, in which we simulate 100,000 independent series of length 100, and then filter the observations
 ```python
 from jaxman import KalmanFilter
 import jax.random as jaxrnd
 from timeit import timeit
+import matplotlib.pyplot as plt
 
 trans_mat = 1.0
 trans_cov = 0.05 ** 2
@@ -28,13 +29,27 @@ obs_cov = 0.1 ** 2
 
 kf = KalmanFilter(trans_mat, trans_cov, obs_mat, obs_cov)
 
-_, y = kf.sample(100, jaxrnd.PRNGKey(123), (100_000,))
+x, y = kf.sample(100, jaxrnd.PRNGKey(123), (100_000,))
 result = kf.filter(y)
 
 # And do a quick timing
-timeit(lambda: kf.filter(y), number=100)
->>> 1.3671077860000196
+print(timeit(lambda: kf.filter(y), number=100))
+
+fig, ax = plt.subplots()
+
+ax.plot(y[:, 0], color="salmon", label="observed", alpha=0.75)
+ax.plot(x[:, 0], color="gray", label="latent", alpha=0.75)
+
+ax.plot(result.filtered_means()[:, 0], color="black", linestyle="--", label="inferred", alpha=0.75)
+ax.legend()
+
+plt.show()
 ```
+Resulting in the following pretty picture
+
+<div align="center"> 
+    <img src="./static/filtering.jpg" alt="Logo" width="640" height="480">
+</div>
 
 # Disclaimers
 Note that this project is not endorsed, affiliated or supported by Google/JAX, the name is just a mash-up of Kalman and JAX.
