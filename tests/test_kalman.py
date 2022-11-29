@@ -80,7 +80,7 @@ class TestKalman(object):
         c = kf.correct(jnp.ones((*batch_shape, shape[-1])), p)
 
         assert c.mean.shape == (*batch_shape, shape[0])
-        assert c.covariance.shape == (shape[0], shape[0])
+        assert c.covariance.shape == (*batch_shape, shape[0], shape[0])
 
     @pt.mark.parametrize("pykf_kf", kalman_filters_with_pykalman())
     @pt.mark.parametrize("replicas", [1, 10, 100])
