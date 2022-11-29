@@ -101,8 +101,7 @@ class TestKalman(object):
         c = np.stack(c, axis=1)
 
         jax_result = kf.filter(y)
-        m_jax = jax_result.filtered_means()
-        c_jax = jax_result.filtered_covariances()
+        m_jax, c_jax = jax_result.filtered()
 
         m_error = error(m, m_jax)
         c_error = error(c, c_jax)

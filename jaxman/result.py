@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Tuple
 import jax.numpy as jnp
 
 
@@ -57,3 +57,13 @@ class Result(object):
         covs = [c.covariance for c in self.corrections][1:]
 
         return jnp.stack(covs)
+
+    def filtered(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        Returns both the filtered means and covariances.
+
+        Returns:
+            Tuple[jnp.ndarray, jnp.ndarray]: filtered means and covariances.
+        """
+
+        return self.filtered_means(), self.filtered_covariances()
