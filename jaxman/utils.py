@@ -97,12 +97,8 @@ def correct(x: jnp.ndarray, h: jnp.ndarray, p: jnp.ndarray, r: jnp.ndarray, y: j
 
     inv_s_pred = jnp.linalg.pinv(s_pred)
     gain = p @ h_transpose @ inv_s_pred
-
-    # NB: This is a proxy for checking whether the data is batched
-    if y.ndim <= 1:
-        x_corr = x + gain @ z_pred
-    else:
-        x_corr = x + (gain @ z_pred[..., None]).squeeze(-1)
+    
+    x_corr = x + (gain @ z_pred[..., None]).squeeze(-1)
 
     p_corr = (jnp.eye(x.shape[-1]) - gain @ h) @ p
 
