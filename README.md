@@ -5,7 +5,7 @@ jaxman is yet another library that implements the [Kalman filter](https://en.wik
 Follow the below instructions in order to get started with jaxman.
 
 ## Prerequisites
-Start by [installing jax](https://jax.readthedocs.io/en/latest/installation.html).
+Start by [installing JAX](https://jax.readthedocs.io/en/latest/installation.html).
 
 ## Installation
 The library is currently not available on pypi, and there are currently no plans on releasing it there, so install it via
