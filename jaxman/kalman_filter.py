@@ -142,6 +142,8 @@ class KalmanFilter(object):
         y_res = tuple()
 
         for t in range(timesteps):
+            _, prng_key = jrnd.split(prng_key)
+
             x = jrnd.multivariate_normal(
                 prng_key, (self.trans_mat @ x[..., None]).squeeze(-1), self.trans_cov, method="svd"
             )
