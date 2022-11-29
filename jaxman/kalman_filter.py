@@ -12,7 +12,7 @@ from .result import Correction, Prediction, Result
 class KalmanFilter(object):
     r"""
     Implements a standard [Kalman Filter](https://en.wikipedia.org/wiki/Kalman_filter) which enables [Single Instruction Multiple Data](https://en.wikipedia.org/wiki/Single_instruction,_multiple_data) in JAX.
-    Inspired by [simdkalman](https://github.com/oseiskar/simdkalman).
+    Inspired by [simdkalman](https://github.com/oseiskar/simdkalman) and [pykalman](https://pykalman.github.io/).
     """
 
     def __init__(
@@ -57,17 +57,17 @@ class KalmanFilter(object):
 
     def initialize(self) -> Correction:
         """
-        Generates the initial prediction.
+        Generates the initial correction.
 
         Returns:
-            Prediction: initial prediction.
+            Correction: initial correction.
         """
 
         return Correction(self.init_mean, self.init_cov, 0.0, 0.0)
 
     def predict(self, correction: Correction) -> Prediction:
         """
-        Predicts Kalman filter one step ahead.
+        Predicts from the latest correction.
 
         Args:
             correction (Correction): latest correction.
@@ -82,7 +82,7 @@ class KalmanFilter(object):
 
     def correct(self, y: jnp.ndarray, prediction: Prediction) -> Correction:
         """
-        Corrects Kalman filter.
+        Corrects latest prediction.
 
         Args:
             y (jnp.ndarray): latest observation.
@@ -125,19 +125,20 @@ class KalmanFilter(object):
         self, timesteps: int, prng_key: jrnd.PRNGKey, batch_shape: tuple = None
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """
-        Samples
+        Samples the LDS `timesteps` into the future.
 
         Args:
-            timesteps (int): _description_
-            batch_shape (tuple): _description_
+            timesteps (int): number of future timesteps.
+            prng_key (jax.random.PRNGKey): random number generator key.
+            batch_shape (tuple): batch shape.
 
         Returns:
-            Tuple[jnp.ndarray, jnp.ndarray]: _description_
+            Tuple[jnp.ndarray, jnp.ndarray]: returns the sampled states for the latent and observable processes.
         """
 
         x = jrnd.multivariate_normal(prng_key, self.init_mean, self.init_cov, batch_shape)
 
-        x_res = (x,)
+        x_res = tuple()
         y_res = tuple()
 
         for t in range(timesteps):
@@ -151,4 +152,4 @@ class KalmanFilter(object):
             x_res += (x,)
             y_res += (y,)
 
-        return jnp.stack(x_res)[1:], jnp.stack(y_res)
+        return jnp.stack(x_res), jnp.stack(y_res)
