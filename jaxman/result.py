@@ -45,7 +45,7 @@ class Result(object):
         means = [c.mean for c in self.corrections][1:]
 
         return jnp.stack(means)
-    
+
     def filtered_covariances(self) -> jnp.ndarray:
         """
         Returns the filtered covariances of the result.

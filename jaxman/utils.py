@@ -12,7 +12,7 @@ def to_array(*x: ArrayLike) -> Sequence[jnp.ndarray]:
     Coerces all inputs to be a `jax.numpy.ndarray`.
 
     Returns:
-        jnp.ndarray: a sequence of `jax.numpy.ndarray`. 
+        jnp.ndarray: a sequence of `jax.numpy.ndarray`.
     """
 
     return tuple(jnp.array(x_) for x_ in x)
@@ -33,7 +33,7 @@ def coerce_covariance(cov: jnp.ndarray) -> jnp.ndarray:
         return cov
 
     dim = 1 if cov.ndim == 0 else cov.shape[0]
-    
+
     return cov * jnp.eye(dim)
 
 
@@ -92,13 +92,13 @@ def correct(x: jnp.ndarray, h: jnp.ndarray, p: jnp.ndarray, r: jnp.ndarray, y: j
     """
 
     z_pred = y - (h @ x[..., None]).squeeze(-1)
-    
+
     h_transpose = h.transpose(-1, -2)
     s_pred = h @ p @ h_transpose + r
 
     inv_s_pred = jnp.linalg.pinv(s_pred)
     gain = p @ h_transpose @ inv_s_pred
-    
+
     x_corr = x + (gain @ z_pred[..., None]).squeeze(-1)
     p_corr = (jnp.eye(x.shape[-1]) - gain @ h) @ p
 
