@@ -36,4 +36,5 @@ timeit(lambda: kf.filter(y), number=100)
 >>> 1.3671077860000196
 ```
 
-
+# Disclaimers
+Note that this project is not endorsed, affiliated or supported by Google/JAX, the name is just a mash-up of Kalman and JAX.
