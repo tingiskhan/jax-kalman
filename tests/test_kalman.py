@@ -54,8 +54,7 @@ def kalman_filters_with_pykalman():
 
 
 class TestKalman(object):
-    # TODO: Figure out a better eps.
-    EPS = 1e-3
+    EPS = 1e-6
 
     @pt.mark.parametrize("conf_and_expected", kalman_configurations())
     def test_initializer(self, conf_and_expected):
