@@ -33,7 +33,8 @@ x, y = kf.sample(100, jaxrnd.PRNGKey(123), (100_000,))
 result = kf.filter(y)
 
 # And do a quick timing
-print(timeit(lambda: kf.filter(y), number=100))
+print(timeit(lambda: kf.filter(y), number=1))
+>>> 3.6531236000000717
 
 fig, ax = plt.subplots()
 

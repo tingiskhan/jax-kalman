@@ -55,15 +55,15 @@ class KalmanFilter(object):
         self.init_cov = coerce_covariance(init_cov)
         self.init_mean = coerce_matrix(init_mean, 0, self.trans_mat.shape[-1])
 
-    def initialize(self) -> Correction:
+    def initialize(self) -> Prediction:
         """
-        Generates the initial correction.
+        Generates the initial state.
 
         Returns:
-            Correction: initial correction.
+            Prediction: initial state.
         """
 
-        return Correction(self.init_mean, self.init_cov, 0.0, 0.0)
+        return Prediction(self.init_mean, self.init_cov)
 
     def predict(self, correction: Correction) -> Prediction:
         """
@@ -107,17 +107,15 @@ class KalmanFilter(object):
         Returns:
             Result: result object.
         """
+        
+        result = Result()        
 
-        c = self.initialize()
-        result = Result()
-
-        result.append(None, c)
-
+        p = self.initialize()
         for yt in y:
-            p = self.predict(c)
             c = self.correct(yt, p)
-
             result.append(p, c)
+
+            p = self.predict(c)            
 
         return result
 
@@ -143,10 +141,11 @@ class KalmanFilter(object):
 
         for t in range(timesteps):
             _, prng_key = jrnd.split(prng_key)
-
             x = jrnd.multivariate_normal(
                 prng_key, (self.trans_mat @ x[..., None]).squeeze(-1), self.trans_cov, method="svd"
             )
+
+            _, prng_key = jrnd.split(prng_key)
             y = jrnd.multivariate_normal(
                 prng_key, (self.obs_mat @ x[..., None]).squeeze(-1), self.obs_cov, method="svd"
             )
