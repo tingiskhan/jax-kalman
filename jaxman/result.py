@@ -42,7 +42,7 @@ class Result(object):
             jnp.ndarray: filtered means.
         """
 
-        means = [c.mean for c in self.corrections][1:]
+        means = [c.mean for c in self.corrections]
 
         return jnp.stack(means)
 
@@ -54,7 +54,7 @@ class Result(object):
             jnp.ndarray: filtered covariances.
         """
 
-        covs = [c.covariance for c in self.corrections][1:]
+        covs = [c.covariance for c in self.corrections]
 
         return jnp.stack(covs)
 
