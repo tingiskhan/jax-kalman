@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import pytest
+
 from jaxman import KalmanFilter
 
 
@@ -25,25 +26,25 @@ def kf_params():
     # For data generation, we need standard deviation from covariance
     obs_noise_std = jnp.sqrt(observation_covariance[0, 0])  # sqrt(0.1) ~ 0.316
     return {
-        'transition_matrices': transition_matrices,
-        'observation_matrices': observation_matrices,
-        'transition_covariance': transition_covariance,
-        'observation_covariance': observation_covariance,
-        'initial_state_mean': initial_state_mean,
-        'initial_state_covariance': initial_state_covariance,
-        'obs_noise_std': obs_noise_std
+        "transition_matrices": transition_matrices,
+        "observation_matrices": observation_matrices,
+        "transition_covariance": transition_covariance,
+        "observation_covariance": observation_covariance,
+        "initial_state_mean": initial_state_mean,
+        "initial_state_covariance": initial_state_covariance,
+        "obs_noise_std": obs_noise_std,
     }
 
 
 @pytest.fixture
 def simple_kf(kf_params):
     return KalmanFilter(
-        transition_matrices=kf_params['transition_matrices'],
-        observation_matrices=kf_params['observation_matrices'],
-        transition_covariance=kf_params['transition_covariance'],
-        observation_covariance=kf_params['observation_covariance'],
-        initial_state_mean=kf_params['initial_state_mean'],
-        initial_state_covariance=kf_params['initial_state_covariance']
+        transition_matrices=kf_params["transition_matrices"],
+        observation_matrices=kf_params["observation_matrices"],
+        transition_covariance=kf_params["transition_covariance"],
+        observation_covariance=kf_params["observation_covariance"],
+        initial_state_mean=kf_params["initial_state_mean"],
+        initial_state_covariance=kf_params["initial_state_covariance"],
     )
 
 
@@ -52,7 +53,7 @@ def test_filter_with_no_missing(simple_kf, kf_params):
     key = jax.random.PRNGKey(123)
     true_states = jnp.linspace(0, 10, 50)
     noise = jax.random.normal(key, (50,))
-    observations = true_states + kf_params['obs_noise_std'] * noise
+    observations = true_states + kf_params["obs_noise_std"] * noise
 
     filtered_means, filtered_covs, ll = simple_kf.filter(observations)
     assert filtered_means.shape == (50, 1)
@@ -69,7 +70,7 @@ def test_filter_with_missing(simple_kf, kf_params):
     key = jax.random.PRNGKey(1)
     true_states = jnp.linspace(0, 10, 50)
     noise = jax.random.normal(key, (50,))
-    observations = true_states + kf_params['obs_noise_std'] * noise
+    observations = true_states + kf_params["obs_noise_std"] * noise
 
     # Introduce missing data
     observations = observations.at[10].set(jnp.nan)
@@ -91,7 +92,7 @@ def test_smooth_with_missing(simple_kf, kf_params):
     key = jax.random.PRNGKey(2)
     true_states = jnp.linspace(0, 10, 50)
     noise = jax.random.normal(key, (50,))
-    observations = true_states + kf_params['obs_noise_std'] * noise
+    observations = true_states + kf_params["obs_noise_std"] * noise
 
     # Introduce missing data
     observations = observations.at[10].set(jnp.nan)
@@ -114,7 +115,7 @@ def test_filter_update(simple_kf, kf_params):
     fc = simple_kf.initial_state_covariance
 
     key = jax.random.PRNGKey(3)
-    obs = 1.0 + kf_params['obs_noise_std'] * jax.random.normal(key, (1,))
+    obs = 1.0 + kf_params["obs_noise_std"] * jax.random.normal(key, (1,))
 
     new_mean, new_cov, ll = simple_kf.filter_update(fm, fc, obs)
     assert new_mean.shape == (1,)
