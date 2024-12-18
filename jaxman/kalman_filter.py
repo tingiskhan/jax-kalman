@@ -85,36 +85,36 @@ class KalmanFilter:
             (new_mean, new_cov, log_likelihood_t) The filtered state mean and covariance
             for the current time step, and the incremental log-likelihood.
         """
-        A = self.transition_matrices
-        C = self.observation_matrices
-        Q = self.transition_covariance
-        R = self.observation_covariance
+        a = self.transition_matrices
+        c = self.observation_matrices
+        q = self.transition_covariance
+        r = self.observation_covariance
 
         pred_mean, pred_cov, ll_cum = carry
 
         # Prediction step
-        pred_mean = A @ pred_mean
-        pred_cov = A @ pred_cov @ A.T + Q
+        pred_mean = a @ pred_mean
+        pred_cov = a @ pred_cov @ a.T + q
 
         # Identify missing observations and replace them with predicted means
         mask = ~jnp.isnan(obs_t)
-        yhat = C @ pred_mean
+        yhat = c @ pred_mean
         obs_t_filled = jnp.where(mask, obs_t, yhat)
 
         # Compute innovation and S
         innovation = obs_t_filled - yhat
-        S = C @ pred_cov @ C.T + R
+        S = c @ pred_cov @ c.T + r
 
         # Compute log-likelihood increment
         log_likelihood_t = MultivariateNormal(loc=yhat, covariance_matrix=S).log_prob(obs_t_filled)
 
         # Compute Kalman gain using solve: S K^T = (C P)^T => K = (S \ (C P))^T
-        K = jnp.linalg.solve(S, (C @ pred_cov).T).T
+        K = jnp.linalg.solve(S, (c @ pred_cov).T).T
 
         # Joseph form for covariance
         I = jnp.eye(self.n_dim_state)
         new_mean = pred_mean + K @ innovation
-        new_cov = (I - K @ C) @ pred_cov @ (I - K @ C).T + K @ R @ K.T
+        new_cov = (I - K @ c) @ pred_cov @ (I - K @ c).T + K @ r @ K.T
 
         new_ll_cum = ll_cum + log_likelihood_t
 
@@ -169,17 +169,17 @@ class KalmanFilter:
         -------
         (smoothed_mean_t, smoothed_cov_t) for this time step, repeated as output.
         """
-        A = self.transition_matrices
+        a = self.transition_matrices
         next_smoothed_mean, next_smoothed_cov = carry
         filtered_mean_t, filtered_cov_t, predicted_mean_next, predicted_cov_next = args
 
         # Compute J using solve
         # J = filtered_cov_t @ A.T @ inv(predicted_cov_next)
         # Solve predicted_cov_next * X^T = (A @ filtered_cov_t.T)
-        J = jnp.linalg.solve(predicted_cov_next, (A @ filtered_cov_t.T).T).T
+        j = jnp.linalg.solve(predicted_cov_next, (a @ filtered_cov_t.T).T).T
 
-        smoothed_mean_t = filtered_mean_t + J @ (next_smoothed_mean - predicted_mean_next)
-        smoothed_cov_t = filtered_cov_t + J @ (next_smoothed_cov - predicted_cov_next) @ J.T
+        smoothed_mean_t = filtered_mean_t + j @ (next_smoothed_mean - predicted_mean_next)
+        smoothed_cov_t = filtered_cov_t + j @ (next_smoothed_cov - predicted_cov_next) @ j.T
 
         return (smoothed_mean_t, smoothed_cov_t), (smoothed_mean_t, smoothed_cov_t)
 
@@ -209,8 +209,8 @@ class KalmanFilter:
         observations = jnp.asarray(observations)
         filtered_means, filtered_covs, ll = self.filter(observations)
 
-        A = self.transition_matrices
-        Q = self.transition_covariance
+        a = self.transition_matrices
+        q =  self.transition_covariance
 
         # Compute predicted means and covariances
         def pred_body(
@@ -219,8 +219,8 @@ class KalmanFilter:
         ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
             pm, pc = carry
             fm_t, fc_t = x
-            pm_next = A @ pm
-            pc_next = A @ pc @ A.T + Q
+            pm_next = a @ pm
+            pc_next = a @ pc @ a.T + q
             return (fm_t, fc_t), (pm_next, pc_next)
 
         init_carry = (self.initial_state_mean, self.initial_state_covariance)
@@ -228,8 +228,8 @@ class KalmanFilter:
                                                              (filtered_means[:-1], filtered_covs[:-1]))
 
         # Insert the first prediction at time 0
-        first_pm = A @ self.initial_state_mean
-        first_pc = A @ self.initial_state_covariance @ A.T + Q
+        first_pm = a @ self.initial_state_mean
+        first_pc = a @ self.initial_state_covariance @ a.T + q
         predicted_means = jnp.concatenate([jnp.reshape(first_pm, (1, -1)), predicted_means], axis=0)
         predicted_covs = jnp.concatenate(
             [jnp.reshape(first_pc, (1, self.n_dim_state, self.n_dim_state)), predicted_covs], axis=0)
@@ -279,32 +279,32 @@ class KalmanFilter:
         if observation is None:
             observation = jnp.full((self.n_dim_obs,), jnp.nan)
 
-        A = self.transition_matrices
-        C = self.observation_matrices
-        Q = self.transition_covariance
-        R = self.observation_covariance
+        a = self.transition_matrices
+        c = self.observation_matrices
+        q =  self.transition_covariance
+        r = self.observation_covariance
 
         # Prediction
-        pred_mean = A @ filtered_state_mean
-        pred_cov = A @ filtered_state_covariance @ A.T + Q
+        pred_mean = a @ filtered_state_mean
+        pred_cov = a @ filtered_state_covariance @ a.T + q
 
         # Identify missing and fill
         mask = ~jnp.isnan(observation)
-        yhat = C @ pred_mean
+        yhat = c @ pred_mean
         obs_t_filled = jnp.where(mask, observation, yhat)
 
         innovation = obs_t_filled - yhat
-        S = C @ pred_cov @ C.T + R
+        s = c @ pred_cov @ c.T + r
 
         # Log-likelihood
-        log_likelihood_t = MultivariateNormal(loc=yhat, covariance_matrix=S).log_prob(obs_t_filled)
+        log_likelihood_t = MultivariateNormal(loc=yhat, covariance_matrix=s).log_prob(obs_t_filled)
 
         # Kalman gain via solve
-        K = jnp.linalg.solve(S, (C @ pred_cov).T).T
+        k = jnp.linalg.solve(s, (c @ pred_cov).T).T
 
         # Joseph form
-        I = jnp.eye(self.n_dim_state)
-        new_mean = pred_mean + K @ innovation
-        new_cov = (I - K @ C) @ pred_cov @ (I - K @ C).T + K @ R @ K.T
+        eye = jnp.eye(self.n_dim_state)
+        new_mean = pred_mean + k @ innovation
+        new_cov = (eye - k @ c) @ pred_cov @ (eye - k @ c).T + k @ r @ k.T
 
         return new_mean, new_cov, float(log_likelihood_t)
