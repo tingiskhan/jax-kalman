@@ -239,7 +239,7 @@ class KalmanFilter:
         args = (filtered_means[:-1], filtered_covs[:-1], predicted_means[1:], predicted_covs[1:])
         rev_args = tuple(a[::-1] for a in args)
         (sm_last_mean, sm_last_cov), (rev_sm_means, rev_sm_covs) = lax.scan(
-            self._smooth_step, final_carry, list(zip(*rev_args))
+            self._smooth_step, final_carry, rev_args
         )
 
         smoothed_means = jnp.concatenate([rev_sm_means[::-1], jnp.reshape(sm_last_mean, (1, -1))], axis=0)
