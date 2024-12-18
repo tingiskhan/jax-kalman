@@ -14,16 +14,19 @@ class KalmanFilter:
     - Applies the Joseph form for covariance updates for better numerical robustness.
     - Handles missing observations by replacing them with the predicted observation means.
     - Computes the log-likelihood of the observed data under the linear-Gaussian model using numpyro distributions.
+    - Supports optional transition and observation offsets.
     """
 
     def __init__(
-        self,
-        transition_matrices: jnp.ndarray,
-        observation_matrices: jnp.ndarray,
-        transition_covariance: jnp.ndarray,
-        observation_covariance: jnp.ndarray,
-        initial_state_mean: jnp.ndarray,
-        initial_state_covariance: jnp.ndarray,
+            self,
+            transition_matrices: jnp.ndarray,
+            observation_matrices: jnp.ndarray,
+            transition_covariance: jnp.ndarray,
+            observation_covariance: jnp.ndarray,
+            initial_state_mean: jnp.ndarray,
+            initial_state_covariance: jnp.ndarray,
+            transition_offset: Optional[jnp.ndarray] = None,
+            observation_offset: Optional[jnp.ndarray] = None,
     ) -> None:
         """
         Initialize the Kalman filter parameters.
@@ -42,9 +45,10 @@ class KalmanFilter:
             Mean vector of the initial state distribution.
         initial_state_covariance : jnp.ndarray of shape (n_dim_state, n_dim_state)
             Covariance matrix of the initial state distribution.
-
-        All parameters should be JAX arrays (or will be converted to JAX arrays),
-        and they should be compatible with JIT compilation and vectorized operations.
+        transition_offset : jnp.ndarray of shape (n_dim_state,), optional
+            A constant offset added to the state after applying the transition matrix.
+        observation_offset : jnp.ndarray of shape (n_dim_obs,), optional
+            A constant offset added to the predicted observations after applying the observation matrix.
         """
         self.transition_matrices = jnp.array(transition_matrices)
         self.observation_matrices = jnp.array(observation_matrices)
@@ -53,19 +57,20 @@ class KalmanFilter:
         self.initial_state_mean = jnp.array(initial_state_mean)
         self.initial_state_covariance = jnp.array(initial_state_covariance)
 
+        self.transition_offset = None if transition_offset is None else jnp.array(transition_offset)
+        self.observation_offset = None if observation_offset is None else jnp.array(observation_offset)
+
         # Determine dimensions
         self.n_dim_state: int = self.transition_matrices.shape[0]
         self.n_dim_obs: int = self.observation_matrices.shape[0]
 
     def _filter_step(
-        self, carry: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], obs_t: jnp.ndarray
+            self,
+            carry: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+            obs_t: jnp.ndarray
     ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
         """
         One step of the forward filtering using the Kalman filter equations.
-
-        Instead of computing inverses directly, we use `jnp.linalg.solve` for numerical stability.
-        The Joseph form is employed for covariance updates.
-        Missing observations are replaced by predicted observation means.
 
         Parameters
         ----------
@@ -93,22 +98,28 @@ class KalmanFilter:
 
         # Prediction step
         pred_mean = a @ pred_mean
+        if self.transition_offset is not None:
+            pred_mean = pred_mean + self.transition_offset
         pred_cov = a @ pred_cov @ a.T + q
 
         # Identify missing observations and replace them with predicted means
         mask = ~jnp.isnan(obs_t)
+
         yhat = c @ pred_mean
+        if self.observation_offset is not None:
+            yhat = yhat + self.observation_offset
+
         obs_t_filled = jnp.where(mask, obs_t, yhat)
 
         # Compute innovation and S
         innovation = obs_t_filled - yhat
-        S = c @ pred_cov @ c.T + r
+        s = c @ pred_cov @ c.T + r
 
         # Compute log-likelihood increment
-        log_likelihood_t = MultivariateNormal(loc=yhat, covariance_matrix=S).log_prob(obs_t_filled)
+        log_likelihood_t = MultivariateNormal(loc=yhat, covariance_matrix=s).log_prob(obs_t_filled)
 
         # Compute Kalman gain using solve: S K^T = (C P)^T => K = (S \ (C P))^T
-        k = jnp.linalg.solve(S, (c @ pred_cov).T).T
+        k = jnp.linalg.solve(s, (c @ pred_cov).T).T
 
         # Joseph form for covariance
         eye = jnp.eye(self.n_dim_state)
@@ -147,7 +158,9 @@ class KalmanFilter:
         return filtered_means, filtered_covs, final_ll
 
     def _smooth_step(
-        self, carry: Tuple[jnp.ndarray, jnp.ndarray], args: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
+            self,
+            carry: Tuple[jnp.ndarray, jnp.ndarray],
+            args: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
     ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
         """
         One step of the backward smoothing (RTS smoother).
@@ -158,18 +171,12 @@ class KalmanFilter:
             The smoothed mean and covariance from the next time step.
         args : tuple (filtered_mean_t, filtered_cov_t, predicted_mean_next, predicted_cov_next)
             Quantities from the forward pass and predictions for the next time step.
-
-        Returns
-        -------
-        (smoothed_mean_t, smoothed_cov_t) for this time step, repeated as output.
         """
         a = self.transition_matrices
         next_smoothed_mean, next_smoothed_cov = carry
         filtered_mean_t, filtered_cov_t, predicted_mean_next, predicted_cov_next = args
 
         # Compute J using solve
-        # J = filtered_cov_t @ A.T @ inv(predicted_cov_next)
-        # Solve predicted_cov_next * X^T = (A @ filtered_cov_t.T)
         j = jnp.linalg.solve(predicted_cov_next, (a @ filtered_cov_t.T).T).T
 
         smoothed_mean_t = filtered_mean_t + j @ (next_smoothed_mean - predicted_mean_next)
@@ -180,9 +187,6 @@ class KalmanFilter:
     def smooth(self, observations: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, float]:
         """
         Apply RTS smoothing to the filtered estimates.
-
-        Smoothing does not alter the likelihood of the data; it simply refines the state
-        estimates using future observations.
 
         Parameters
         ----------
@@ -205,11 +209,14 @@ class KalmanFilter:
 
         # Compute predicted means and covariances
         def pred_body(
-            carry: Tuple[jnp.ndarray, jnp.ndarray], x: Tuple[jnp.ndarray, jnp.ndarray]
+                carry: Tuple[jnp.ndarray, jnp.ndarray],
+                x: Tuple[jnp.ndarray, jnp.ndarray]
         ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
             pm, pc = carry
             fm_t, fc_t = x
             pm_next = a @ pm
+            if self.transition_offset is not None:
+                pm_next = pm_next + self.transition_offset
             pc_next = a @ pc @ a.T + q
             return (fm_t, fc_t), (pm_next, pc_next)
 
@@ -220,6 +227,8 @@ class KalmanFilter:
 
         # Insert the first prediction at time 0
         first_pm = a @ self.initial_state_mean
+        if self.transition_offset is not None:
+            first_pm = first_pm + self.transition_offset
         first_pc = a @ self.initial_state_covariance @ a.T + q
         predicted_means = jnp.concatenate([jnp.reshape(first_pm, (1, -1)), predicted_means], axis=0)
         predicted_covs = jnp.concatenate(
@@ -240,11 +249,11 @@ class KalmanFilter:
         return smoothed_means, smoothed_covariances, ll
 
     def filter_update(
-        self,
-        filtered_state_mean: jnp.ndarray,
-        filtered_state_covariance: jnp.ndarray,
-        observation: Optional[jnp.ndarray] = None,
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, float]:
+            self,
+            filtered_state_mean: jnp.ndarray,
+            filtered_state_covariance: jnp.ndarray,
+            observation: Optional[jnp.ndarray] = None,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """
         Update the Kalman filter with a single new observation step.
 
@@ -270,35 +279,10 @@ class KalmanFilter:
         if observation is None:
             observation = jnp.full((self.n_dim_obs,), jnp.nan)
 
-        a = self.transition_matrices
-        c = self.observation_matrices
-        q = self.transition_covariance
-        r = self.observation_covariance
+        carry = (filtered_state_mean, filtered_state_covariance, 0.0)
+        state, _ = self._filter_step(carry, observation)
 
-        # Prediction
-        pred_mean = a @ filtered_state_mean
-        pred_cov = a @ filtered_state_covariance @ a.T + q
-
-        # Identify missing and fill
-        mask = ~jnp.isnan(observation)
-        yhat = c @ pred_mean
-        obs_t_filled = jnp.where(mask, observation, yhat)
-
-        innovation = obs_t_filled - yhat
-        s = c @ pred_cov @ c.T + r
-
-        # Log-likelihood
-        log_likelihood_t = MultivariateNormal(loc=yhat, covariance_matrix=s).log_prob(obs_t_filled)
-
-        # Kalman gain via solve
-        k = jnp.linalg.solve(s, (c @ pred_cov).T).T
-
-        # Joseph form
-        eye = jnp.eye(self.n_dim_state)
-        new_mean = pred_mean + k @ innovation
-        new_cov = (eye - k @ c) @ pred_cov @ (eye - k @ c).T + k @ r @ k.T
-
-        return new_mean, new_cov, float(log_likelihood_t)
+        return state
 
 
 __all__ = [
