@@ -15,7 +15,7 @@ def kf_params():
     # Filter parameters
     transition_matrices = jnp.array([[1.0]])  # Identity transition
     observation_matrices = jnp.array([[1.0]])  # Direct observation of the state
-    transition_covariance = jnp.array([[1e-2]])  # State transition noise variance
+    transition_covariance = jnp.array([[1e-1]])  # State transition noise variance
     observation_covariance = jnp.array([[1e-1]])  # Observation noise variance = 0.1
 
     # Initial state parameters
