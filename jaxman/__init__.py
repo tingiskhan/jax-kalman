@@ -1,4 +1,3 @@
-__version__ = "0.0.1"
+from .kalman_filter import *  # noqa: F403
 
-from . import utils
-from .kalman_filter import KalmanFilter
+__version__ = "0.1.0"
