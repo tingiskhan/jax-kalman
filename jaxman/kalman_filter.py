@@ -18,15 +18,15 @@ class KalmanFilter:
     """
 
     def __init__(
-            self,
-            transition_matrices: jnp.ndarray,
-            observation_matrices: jnp.ndarray,
-            transition_covariance: jnp.ndarray,
-            observation_covariance: jnp.ndarray,
-            initial_state_mean: jnp.ndarray,
-            initial_state_covariance: jnp.ndarray,
-            transition_offset: Optional[jnp.ndarray] = None,
-            observation_offset: Optional[jnp.ndarray] = None,
+        self,
+        transition_matrices: jnp.ndarray,
+        observation_matrices: jnp.ndarray,
+        transition_covariance: jnp.ndarray,
+        observation_covariance: jnp.ndarray,
+        initial_state_mean: jnp.ndarray,
+        initial_state_covariance: jnp.ndarray,
+        transition_offset: Optional[jnp.ndarray] = None,
+        observation_offset: Optional[jnp.ndarray] = None,
     ) -> None:
         """
         Initialize the Kalman filter parameters.
@@ -65,9 +65,7 @@ class KalmanFilter:
         self.n_dim_obs: int = self.observation_matrices.shape[0]
 
     def _filter_step(
-            self,
-            carry: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
-            obs_t: jnp.ndarray
+        self, carry: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], obs_t: jnp.ndarray
     ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
         """
         One step of the forward filtering using the Kalman filter equations.
@@ -158,9 +156,7 @@ class KalmanFilter:
         return filtered_means, filtered_covs, final_ll
 
     def _smooth_step(
-            self,
-            carry: Tuple[jnp.ndarray, jnp.ndarray],
-            args: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
+        self, carry: Tuple[jnp.ndarray, jnp.ndarray], args: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
     ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
         """
         One step of the backward smoothing (RTS smoother).
@@ -209,8 +205,7 @@ class KalmanFilter:
 
         # Compute predicted means and covariances
         def pred_body(
-                carry: Tuple[jnp.ndarray, jnp.ndarray],
-                x: Tuple[jnp.ndarray, jnp.ndarray]
+            carry: Tuple[jnp.ndarray, jnp.ndarray], x: Tuple[jnp.ndarray, jnp.ndarray]
         ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
             pm, pc = carry
             fm_t, fc_t = x
@@ -249,10 +244,10 @@ class KalmanFilter:
         return smoothed_means, smoothed_covariances, ll
 
     def filter_update(
-            self,
-            filtered_state_mean: jnp.ndarray,
-            filtered_state_covariance: jnp.ndarray,
-            observation: Optional[jnp.ndarray] = None,
+        self,
+        filtered_state_mean: jnp.ndarray,
+        filtered_state_covariance: jnp.ndarray,
+        observation: Optional[jnp.ndarray] = None,
     ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """
         Update the Kalman filter with a single new observation step.
