@@ -113,18 +113,19 @@ class KalmanFilter:
             for the current time step, and the incremental log-likelihood.
         """
         a = self.transition_matrices
-        c = self.observation_matrices
         q = self.transition_covariance
+
+        c = self.observation_matrices
         r = self.observation_covariance
 
-        pred_mean, pred_cov, ll_cum = carry
+        prev_mean, prev_cov, ll_cum = carry
 
         # Prediction step
-        pred_mean = self.transition_offset + a @ pred_mean
-        pred_cov = a @ pred_cov @ a.T + q
+        pred_mean = self.transition_offset + a @ prev_mean
+        pred_cov = a @ prev_cov @ a.T + q
 
         # Identify missing observations and replace them with predicted means
-        mask = ~jnp.isnan(obs_t)
+        mask = jnp.isfinite(obs_t)
 
         yhat = self.observation_offset + c @ pred_mean
         obs_t_filled = jnp.where(mask, obs_t, yhat)
