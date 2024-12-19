@@ -137,17 +137,18 @@ class KalmanFilter:
         # Compute log-likelihood increment
         log_likelihood_t = MultivariateNormal(loc=y_hat, covariance_matrix=s).log_prob(obs_t_filled)
 
-        # Compute Kalman gain using solve: S K^T = (C P)^T => K = (S \ (C P))^T
-        k = jnp.linalg.solve(s, (c @ pred_cov).T).T
+        # TODO: improve this
+        inv_s = jnp.linalg.pinv(s)
+        k = pred_cov @ c.T @ inv_s
 
         # Joseph form for covariance
         eye = jnp.eye(self.n_dim_state)
-        new_mean = pred_mean + k @ innovation
-        new_cov = (eye - k @ c) @ pred_cov @ (eye - k @ c).T + k @ r @ k.T
+        corrected_mean = pred_mean + k @ innovation
+        corrected_cov = (eye - k @ c) @ pred_cov
 
         new_ll_cum = ll_cum + log_likelihood_t
 
-        return (new_mean, new_cov, new_ll_cum), (new_mean, new_cov, log_likelihood_t)
+        return (corrected_mean, corrected_cov, new_ll_cum), (corrected_mean, corrected_cov, log_likelihood_t)
 
     def filter(self, observations: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, float]:
         """
@@ -230,10 +231,10 @@ class KalmanFilter:
         ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
             pm, pc = carry
             fm_t, fc_t = x
-            pm_next = a @ pm
-            if self.transition_offset is not None:
-                pm_next = pm_next + self.transition_offset
+
+            pm_next = self.transition_offset + a @ pm
             pc_next = a @ pc @ a.T + q
+
             return (fm_t, fc_t), (pm_next, pc_next)
 
         init_carry = (self.initial_state_mean, self.initial_state_covariance)
@@ -242,19 +243,20 @@ class KalmanFilter:
         )
 
         # Insert the first prediction at time 0
-        first_pm = a @ self.initial_state_mean
-        if self.transition_offset is not None:
-            first_pm = first_pm + self.transition_offset
-        first_pc = a @ self.initial_state_covariance @ a.T + q
-        predicted_means = jnp.concatenate([jnp.reshape(first_pm, (1, -1)), predicted_means], axis=0)
+        mean_0 = self.transition_offset + a @ self.initial_state_mean
+        cov_0 = a @ self.initial_state_covariance @ a.T + q
+
+        predicted_means = jnp.concatenate([jnp.reshape(mean_0, (1, -1)), predicted_means], axis=0)
         predicted_covs = jnp.concatenate(
-            [jnp.reshape(first_pc, (1, self.n_dim_state, self.n_dim_state)), predicted_covs], axis=0
+            [jnp.reshape(cov_0, (1, self.n_dim_state, self.n_dim_state)), predicted_covs], axis=0
         )
 
         # Backward smoothing
         final_carry = (filtered_means[-1], filtered_covs[-1])
+
         args = (filtered_means[:-1], filtered_covs[:-1], predicted_means[1:], predicted_covs[1:])
         rev_args = tuple(a[::-1] for a in args)
+
         (sm_last_mean, sm_last_cov), (rev_sm_means, rev_sm_covs) = lax.scan(self._smooth_step, final_carry, rev_args)
 
         smoothed_means = jnp.concatenate([rev_sm_means[::-1], jnp.reshape(sm_last_mean, (1, -1))], axis=0)
