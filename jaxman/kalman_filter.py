@@ -127,15 +127,15 @@ class KalmanFilter:
         # Identify missing observations and replace them with predicted means
         mask = jnp.isfinite(obs_t)
 
-        yhat = self.observation_offset + c @ pred_mean
-        obs_t_filled = jnp.where(mask, obs_t, yhat)
+        y_hat = self.observation_offset + c @ pred_mean
+        obs_t_filled = jnp.where(mask, obs_t, y_hat)
 
         # Compute innovation and S
-        innovation = obs_t_filled - yhat
+        innovation = obs_t_filled - y_hat
         s = c @ pred_cov @ c.T + r
 
         # Compute log-likelihood increment
-        log_likelihood_t = MultivariateNormal(loc=yhat, covariance_matrix=s).log_prob(obs_t_filled)
+        log_likelihood_t = MultivariateNormal(loc=y_hat, covariance_matrix=s).log_prob(obs_t_filled)
 
         # Compute Kalman gain using solve: S K^T = (C P)^T => K = (S \ (C P))^T
         k = jnp.linalg.solve(s, (c @ pred_cov).T).T
