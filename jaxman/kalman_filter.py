@@ -3,8 +3,10 @@ from typing import Optional, Tuple
 import jax.numpy as jnp
 from jax import lax
 from numpyro.distributions import MultivariateNormal
+from jax.tree_util import register_pytree_node_class
 
 
+@register_pytree_node_class
 class KalmanFilter:
     """
     A JAX-based Kalman Filter class with a similar API to pykalman.KalmanFilter.
@@ -57,12 +59,35 @@ class KalmanFilter:
         self.initial_state_mean = jnp.array(initial_state_mean)
         self.initial_state_covariance = jnp.array(initial_state_covariance)
 
-        self.transition_offset = None if transition_offset is None else jnp.array(transition_offset)
-        self.observation_offset = None if observation_offset is None else jnp.array(observation_offset)
-
-        # Determine dimensions
         self.n_dim_state: int = self.transition_matrices.shape[0]
         self.n_dim_obs: int = self.observation_matrices.shape[0]
+
+        if transition_offset is None:
+            transition_offset = jnp.zeros(self.n_dim_state)
+
+        if observation_offset is None:
+            observation_offset = jnp.zeros(self.n_dim_obs)
+
+        self.transition_offset = transition_offset
+        self.observation_offset = observation_offset
+
+    def tree_flatten(self):
+        children = (
+            self.transition_matrices,
+            self.observation_matrices,
+            self.transition_covariance,
+            self.observation_offset,
+            self.initial_state_mean,
+            self.initial_state_covariance,
+            self.transition_offset,
+            self.observation_offset,
+        )
+
+        return (children, None)
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
 
     def _filter_step(
         self, carry: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], obs_t: jnp.ndarray
@@ -95,18 +120,13 @@ class KalmanFilter:
         pred_mean, pred_cov, ll_cum = carry
 
         # Prediction step
-        pred_mean = a @ pred_mean
-        if self.transition_offset is not None:
-            pred_mean = pred_mean + self.transition_offset
+        pred_mean = self.transition_offset + a @ pred_mean
         pred_cov = a @ pred_cov @ a.T + q
 
         # Identify missing observations and replace them with predicted means
         mask = ~jnp.isnan(obs_t)
 
-        yhat = c @ pred_mean
-        if self.observation_offset is not None:
-            yhat = yhat + self.observation_offset
-
+        yhat = self.observation_offset + c @ pred_mean
         obs_t_filled = jnp.where(mask, obs_t, yhat)
 
         # Compute innovation and S
