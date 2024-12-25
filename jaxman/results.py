@@ -8,7 +8,7 @@ class FilterResult(NamedTuple):
     log_likelihood: jnp.ndarray
 
 
-class SmoothResult(NamedTuple):
+class SmoothingResult(NamedTuple):
     means: jnp.ndarray
     covariances: jnp.ndarray
     log_likelihood: jnp.ndarray
