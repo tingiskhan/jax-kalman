@@ -85,10 +85,10 @@ def test_smoothing_vs_pykalman(random_key):
         n_dim_obs=obs_dim
     )
 
-    states_ref, obs_ref = kf_ref.sample(n_timesteps=25, initial_state=[5.0, -1.0])
+    states_ref, obs_ref = kf_ref.sample(n_timesteps=25, initial_state=[0.0, 0.0])
 
     kf_jax = KalmanFilter(
-        initial_mean=jnp.array([5.0, -1.0]),
+        initial_mean=jnp.array([0.0, 0.0]),
         initial_cov=jnp.eye(state_dim),
         transition_matrix=F,
         transition_cov=Q,
