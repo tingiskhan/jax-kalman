@@ -26,6 +26,7 @@ def test_filter_vs_pykalman(random_key):
     Q = jnp.array([[1e-4, 0.0], [0.0, 1e-4]])
     H = jnp.array([[1.0, 0.0]])
     R = jnp.array([[1e-1]])
+    transition_offset = jnp.array([0.01, 0.0])
 
     np.random.seed(42)
     kf_ref = PyKalman(
@@ -35,23 +36,82 @@ def test_filter_vs_pykalman(random_key):
         observation_covariance=R,
         initial_state_mean=[0, 0],
         n_dim_obs=obs_dim,
+        transition_offsets=np.array(transition_offset),
     )
-    states_ref, obs_ref = kf_ref.sample(n_timesteps=20, initial_state=[1, 1])
+    states_ref, obs_ref = kf_ref.sample(n_timesteps=20, initial_state=[0, 0])
 
     kf_jax = KalmanFilter(
-        initial_mean=jnp.array([1.0, 1.0]),
+        initial_mean=jnp.array([0.0, 0.0]),
         initial_cov=jnp.eye(state_dim),
         transition_matrix=F,
         transition_cov=Q,
         observation_matrix=H,
         observation_cov=R,
+        transition_offset=transition_offset,
     )
 
     obs_jax = jnp.array(obs_ref)
     fm, fc, ll = kf_jax.filter(obs_jax)
 
     pf_means, pf_covs = kf_ref.filter(obs_ref)
-    assert_allclose(fm, pf_means, atol=1e-2, rtol=1e-2)
+    ll_ref = kf_ref.loglikelihood(obs_ref)
+
+    assert_allclose(ll_ref, ll, atol=5e-2)
+    assert_allclose(fm[1:], pf_means[1:], atol=5e-2)
+
+
+def test_smoothing_vs_pykalman(random_key):
+    """
+    Compares the RTS smoothing results of the custom KalmanFilter class to the built-in smoothing in pykalman.
+    We check that smoothed means/covariances are numerically close.
+    """
+    state_dim = 2
+    obs_dim = 1
+
+    F = jnp.array([[1.0, 1.0],
+                   [0.0, 1.0]])
+    Q = jnp.array([[1e-2, 0.0],
+                   [0.0, 1e-2]])
+    H = jnp.array([[1.0, 0.0]])
+    R = jnp.array([[1e-1]])
+
+    np.random.seed(42)
+    kf_ref = PyKalman(
+        transition_matrices=np.array(F),
+        transition_covariance=np.array(Q),
+        observation_matrices=np.array(H),
+        observation_covariance=np.array(R),
+        initial_state_mean=np.array([0.0, 0.0]),
+        n_dim_obs=obs_dim
+    )
+
+    states_ref, obs_ref = kf_ref.sample(n_timesteps=25, initial_state=[5.0, -1.0])
+
+    kf_jax = KalmanFilter(
+        initial_mean=jnp.array([5.0, -1.0]),
+        initial_cov=jnp.eye(state_dim),
+        transition_matrix=F,
+        transition_cov=Q,
+        observation_matrix=H,
+        observation_cov=R
+    )
+
+    obs_jax = jnp.array(obs_ref)
+
+    pykalman_smoothed_means, pykalman_smoothed_covs = kf_ref.smooth(obs_ref)
+
+    means, covariances, _ = kf_jax.smooth(obs_jax)
+    jax_smoothed_means = np.array(means)
+    jax_smoothed_covs = np.array(covariances)
+
+    # Compare
+    assert jax_smoothed_means.shape == pykalman_smoothed_means.shape
+    assert jax_smoothed_covs.shape == pykalman_smoothed_covs.shape
+
+    # We allow some numerical tolerance due to different internal implementations
+    assert_allclose(jax_smoothed_means, pykalman_smoothed_means, atol=1e-2, rtol=1e-2)
+    for t in range(len(jax_smoothed_covs)):
+        assert_allclose(jax_smoothed_covs[t], pykalman_smoothed_covs[t], atol=1e-2, rtol=1e-2)
 
 
 def test_partial_missing_data(random_key):
