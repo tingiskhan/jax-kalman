@@ -150,7 +150,12 @@ class KalmanFilter:
         return mean_pred, cov_pred
 
     def _update(
-        self, mean_pred: jnp.ndarray, cov_pred: jnp.ndarray, obs_masked: jnp.ndarray, H_masked: jnp.ndarray, R_masked: jnp.ndarray
+        self,
+        mean_pred: jnp.ndarray,
+        cov_pred: jnp.ndarray,
+        obs_masked: jnp.ndarray,
+        H_masked: jnp.ndarray,
+        R_masked: jnp.ndarray,
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         S = H_masked @ cov_pred @ H_masked.T + R_masked
         S_pinv = jnp.linalg.pinv(S)
@@ -201,22 +206,20 @@ class KalmanFilter:
 
         return predicted_means, predicted_covs, filtered_means, filtered_covs, total_ll
 
-    def filter(
-        self, observations: jnp.ndarray, missing_value: float = 1e12
-    ) -> FilterResult:
+    def filter(self, observations: jnp.ndarray, missing_value: float = 1e12) -> FilterResult:
         """
-       Runs forward filtering over a sequence of observations, returning a named tuple
-       FilterResult(means, covariances, log_likelihood).
-       """
+        Runs forward filtering over a sequence of observations, returning a named tuple
+        FilterResult(means, covariances, log_likelihood).
+        """
 
-        (_, __, filtered_means, filtered_covs, total_ll) = self._forward_pass(
-            observations, missing_value
-        )
+        (_, __, filtered_means, filtered_covs, total_ll) = self._forward_pass(observations, missing_value)
 
         return FilterResult(filtered_means, filtered_covs, total_ll)
 
     # TODO: fix
-    def smooth(self, observations: jnp.ndarray, missing_value: float = 1e12) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    def smooth(
+        self, observations: jnp.ndarray, missing_value: float = 1e12
+    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """
         Runs forward filtering + RTS backward pass for smoothing, returning SmoothResult(means, covariances, log_likelihood).
 
