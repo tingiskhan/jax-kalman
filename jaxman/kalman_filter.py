@@ -219,30 +219,25 @@ class KalmanFilter:
     # TODO: fix
     def smooth(
         self, observations: jnp.ndarray, missing_value: float = 1e12
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    ) -> SmoothingResult:
         """
         Runs forward filtering + RTS backward pass for smoothing, returning SmoothResult(means, covariances, log_likelihood).
 
         The backward pass uses a reverse-time lax.scan to fill in smoothed results for each time step.
         """
-        pm, pc, fm, fc, ll = self._forward_pass(observations, missing_value)
+        predicted_means, predicted_covs, filter_means, filter_covs, ll = self._forward_pass(observations, missing_value)
 
         num_timesteps = observations.shape[0]
-        state_dim = self.initial_mean.shape[0]
 
-        def rts_step(carry, t_rev):
+        def rts_step(carry, aux_t):
             """
             carry: (mean_next, cov_next, smeans, scovs)
             t_rev: the reversed time index, e.g. from T-2 down to 0
             """
             mean_next, cov_next = carry
+            t, mean_f, cov_f, mean_p, cov_p = aux_t
 
-            mean_f = fm[t_rev]
-            cov_f = fc[t_rev]
-            mean_p = pm[t_rev + 1]
-            cov_p = pc[t_rev + 1]
-
-            F_t = self._get_transition_matrix(t_rev + 1, mean_f)
+            F_t = self._get_transition_matrix(t + 1, mean_f)
             cov_p_inv = jnp.linalg.pinv(cov_p)
 
             A_t = cov_f @ F_t.T @ cov_p_inv
@@ -251,16 +246,21 @@ class KalmanFilter:
 
             return (curr_mean_smooth, curr_cov_smooth), (curr_mean_smooth, curr_cov_smooth)
 
-        carry_init = (fm[-1], fc[-1])
+        carry_init = (filter_means[-1], filter_covs[-1])
 
-        time_inds = jnp.arange(num_timesteps)
+        time_inds = jnp.arange(num_timesteps)[:-1]
         xs = (
             time_inds,
-            fm[-2:],
-            fc[-2:],
+            filter_means[:-1],
+            filter_covs[:-1],
+            predicted_means[1:],
+            predicted_covs[1:],
         )
 
         _, (smoothed_means, smoothed_covariances) = lax.scan(rts_step, carry_init, xs, reverse=True)
+
+        smoothed_means = jnp.concatenate([smoothed_means, jnp.expand_dims(filter_means[-1], axis=0)], axis=0)
+        smoothed_covariances = jnp.concatenate([smoothed_covariances, jnp.expand_dims(filter_covs[-1], axis=0)], axis=0)
 
         return SmoothingResult(smoothed_means, smoothed_covariances, ll)
 
