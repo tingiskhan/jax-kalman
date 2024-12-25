@@ -217,9 +217,7 @@ class KalmanFilter:
         return FilterResult(filtered_means, filtered_covs, total_ll)
 
     # TODO: fix
-    def smooth(
-        self, observations: jnp.ndarray, missing_value: float = 1e12
-    ) -> SmoothingResult:
+    def smooth(self, observations: jnp.ndarray, missing_value: float = 1e12) -> SmoothingResult:
         """
         Runs forward filtering + RTS backward pass for smoothing, returning SmoothResult(means, covariances, log_likelihood).
 
