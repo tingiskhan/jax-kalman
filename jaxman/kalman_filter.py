@@ -5,6 +5,8 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax import lax
 
+from .results import SmoothingResult, FilterResult
+
 
 def _inflate_missing(
     non_valid_mask: jnp.ndarray, obs: jnp.ndarray, H: jnp.ndarray, R: jnp.ndarray, missing_value: float = 1e12
@@ -83,47 +85,57 @@ class KalmanFilter:
         self.observation_offset = observation_offset
 
         if noise_transform is None:
-            st_dim = initial_mean.shape[0]
-            noise_transform = jnp.eye(st_dim)
+            state_dim = initial_mean.shape[0]
+            noise_transform = jnp.eye(state_dim)
+
         self.noise_transform = noise_transform
 
     def _get_transition_matrix(self, t: int, x_prev: jnp.ndarray) -> jnp.ndarray:
         if callable(self.transition_matrix):
             return self.transition_matrix(t, x_prev)
+
         return self.transition_matrix
 
     def _get_transition_cov(self, t: int) -> jnp.ndarray:
         if callable(self.transition_cov):
             return self.transition_cov(t)
+
         return self.transition_cov
 
     def _get_observation_matrix(self, t: int) -> jnp.ndarray:
         if callable(self.observation_matrix):
             return self.observation_matrix(t)
+
         return self.observation_matrix
 
     def _get_observation_cov(self, t: int) -> jnp.ndarray:
         if callable(self.observation_cov):
             return self.observation_cov(t)
+
         return self.observation_cov
 
     def _get_transition_offset(self, t: int) -> jnp.ndarray:
         if self.transition_offset is None:
             return 0.0
+
         if callable(self.transition_offset):
             return self.transition_offset(t)
+
         return self.transition_offset
 
     def _get_observation_offset(self, t: int) -> jnp.ndarray:
         if self.observation_offset is None:
             return 0.0
+
         if callable(self.observation_offset):
             return self.observation_offset(t)
+
         return self.observation_offset
 
     def _get_noise_transform(self, t: int) -> jnp.ndarray:
         if callable(self.noise_transform):
             return self.noise_transform(t)
+
         return self.noise_transform
 
     def _predict(self, mean: jnp.ndarray, cov: jnp.ndarray, t: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -181,6 +193,7 @@ class KalmanFilter:
         final_carry, outputs = lax.scan(scan_fn, init_carry, observations)
 
         _, _, _, total_ll = final_carry
+
         predicted_means = outputs[0]
         predicted_covs = outputs[1]
         filtered_means = outputs[2]
@@ -190,23 +203,20 @@ class KalmanFilter:
 
     def filter(
         self, observations: jnp.ndarray, missing_value: float = 1e12
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    ) -> FilterResult:
         """
        Runs forward filtering over a sequence of observations, returning a named tuple
        FilterResult(means, covariances, log_likelihood).
        """
 
-        (_pred_means, _pred_covs, filtered_means, filtered_covs, total_ll) = self._forward_pass(
+        (_, __, filtered_means, filtered_covs, total_ll) = self._forward_pass(
             observations, missing_value
         )
 
-        return filtered_means, filtered_covs, total_ll
+        return FilterResult(filtered_means, filtered_covs, total_ll)
 
-    def smooth(
-        self,
-        observations: jnp.ndarray,
-        missing_value: float = 1e12
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    # TODO: fix
+    def smooth(self, observations: jnp.ndarray, missing_value: float = 1e12) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """
         Runs forward filtering + RTS backward pass for smoothing, returning SmoothResult(means, covariances, log_likelihood).
 
@@ -222,7 +232,7 @@ class KalmanFilter:
             carry: (mean_next, cov_next, smeans, scovs)
             t_rev: the reversed time index, e.g. from T-2 down to 0
             """
-            mean_next, cov_next, smeans, scovs = carry
+            mean_next, cov_next = carry
 
             mean_f = fm[t_rev]
             cov_f = fc[t_rev]
@@ -236,26 +246,20 @@ class KalmanFilter:
             curr_mean_smooth = mean_f + A_t @ (mean_next - mean_p)
             curr_cov_smooth = cov_f + A_t @ (cov_next - cov_p) @ A_t.T
 
-            smeans = smeans.at[t_rev].set(curr_mean_smooth)
-            scovs = scovs.at[t_rev].set(curr_cov_smooth)
+            return (curr_mean_smooth, curr_cov_smooth), (curr_mean_smooth, curr_cov_smooth)
 
-            return (curr_mean_smooth, curr_cov_smooth, smeans, scovs), None
+        carry_init = (fm[-1], fc[-1])
 
-        smeans_init = jnp.zeros((num_timesteps, state_dim))
-        scovs_init = jnp.zeros((num_timesteps, state_dim, state_dim))
-
-        smeans_init = smeans_init.at[-1].set(fm[-1])
-        scovs_init = scovs_init.at[-1].set(fc[-1])
-
-        carry_init = (fm[-1], fc[-1], smeans_init, scovs_init)
-
-        time_indices_rev = jnp.arange(num_timesteps - 1)[::-1]
-
-        (final_mean_smooth, final_cov_smooth, smeans_final, scovs_final), _ = lax.scan(
-            rts_step, carry_init, time_indices_rev
+        time_inds = jnp.arange(num_timesteps)
+        xs = (
+            time_inds,
+            fm[-2:],
+            fc[-2:],
         )
 
-        return smeans_final, scovs_final, ll
+        _, (smoothed_means, smoothed_covariances) = lax.scan(rts_step, carry_init, xs, reverse=True)
+
+        return SmoothingResult(smoothed_means, smoothed_covariances, ll)
 
     def sample(self, rng_key: jax.random.PRNGKey, num_timesteps: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """
