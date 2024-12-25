@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax import lax
 
-from .results import SmoothingResult, FilterResult
+from .results import FilterResult, SmoothingResult
 
 
 def _inflate_missing(
