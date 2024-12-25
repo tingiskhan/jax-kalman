@@ -160,8 +160,8 @@ class KalmanFilter:
     def _forward_pass(
         self, observations: jnp.ndarray, missing_value: float
     ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        def scan_fn(carry, obs_t):
-            t, mean_t, cov_t, ll_so_far = carry
+        def scan_fn(carry, obs_tp1):
+            t, mean_t, cov_t, ll_t = carry
 
             mean_pred, cov_pred = self._predict(mean_t, cov_t, t)
 
@@ -169,19 +169,19 @@ class KalmanFilter:
             R_t = self._get_observation_cov(t)
             d_t = self._get_observation_offset(t)
 
-            obs_mask = jnp.isnan(obs_t)
-            obs_masked, H_masked, R_masked = _inflate_missing(obs_mask, obs_t, H_t, R_t, missing_value)
+            obs_mask = jnp.isnan(obs_tp1)
+            obs_masked, H_masked, R_masked = _inflate_missing(obs_mask, obs_tp1, H_t, R_t, missing_value)
 
-            pred_mean_masked = H_masked @ mean_pred + jnp.where(jnp.isnan(obs_t), 0.0, d_t)
+            pred_mean_masked = H_masked @ mean_pred + jnp.where(jnp.isnan(obs_tp1), 0.0, d_t)
             pred_cov_masked = H_masked @ cov_pred @ H_masked.T + R_masked
 
             dist_y = dist.MultivariateNormal(loc=pred_mean_masked, covariance_matrix=pred_cov_masked)
             step_log_prob = dist_y.log_prob(obs_masked)
-            new_ll_so_far = ll_so_far + step_log_prob
+            ll_tp1 = ll_t + step_log_prob
 
-            mean_up, cov_up = self._update(mean_pred, cov_pred, obs_t, t, missing_value)
+            mean_up, cov_up = self._update(mean_pred, cov_pred, obs_tp1, t, missing_value)
 
-            return (t + 1, mean_up, cov_up, new_ll_so_far), (mean_pred, cov_pred, mean_up, cov_up)
+            return (t + 1, mean_up, cov_up, ll_tp1), (mean_pred, cov_pred, mean_up, cov_up)
 
         init_carry = (0, self.initial_mean, self.initial_cov, 0.0)
         final_carry, outputs = lax.scan(scan_fn, init_carry, observations)
