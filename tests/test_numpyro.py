@@ -1,103 +1,78 @@
-import os
-
 import pytest
-import numpy as np
 import jax
 import jax.numpy as jnp
 import numpyro
+import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
-from numpyro.distributions import Normal, Uniform, HalfNormal
 from jaxman import KalmanFilter
 
-numpyro.set_platform("cpu")
-numpyro.set_host_device_count(os.cpu_count())
-
 
 @pytest.fixture
-def ar1_true_params():
-    phi = 0.99
-    sigma = 0.05
-    mu = 0.0
-    obs_std = 0.1
-    return phi, sigma, mu, obs_std
+def random_key():
+    return jax.random.PRNGKey(0)
 
 
-@pytest.fixture
-def simulated_data(ar1_true_params):
-    phi, sigma, mu, obs_std = ar1_true_params
-    n_timesteps = 500
-    rng = np.random.RandomState(0)
+def _simulate_data(true_params, rng_key, num_timesteps=30):
+    F = jnp.array([[true_params["F"]]])      # shape (1,1)
+    Q = jnp.array([[true_params["Q"]]])      # shape (1,1)
+    R = jnp.array([[true_params["R"]]])      # shape (1,1)
 
-    states = np.zeros(n_timesteps)
-    states[0] = mu + sigma / np.sqrt(1.0 - phi**2.0) * rng.randn()
-
-    alpha = mu * (1.0 - phi)
-
-    for t in range(1, n_timesteps):
-        states[t] = alpha + phi * states[t - 1] + sigma * rng.randn()
-
-    observations = states + obs_std * rng.randn(n_timesteps)
-    return states, observations
-
-
-@jax.jit
-def build_filter(A, C, Q, R, initial_mean, initial_cov, transition_offset, observation_offset):
-    return KalmanFilter(
-        transition_matrices=A,
-        observation_matrices=C,
-        transition_covariance=Q,
-        observation_covariance=R,
-        initial_state_mean=initial_mean,
-        initial_state_covariance=initial_cov,
-        transition_offset=transition_offset,
-        observation_offset=observation_offset,
+    kf = KalmanFilter(
+        initial_mean=jnp.array([true_params["initial_mean"]]),
+        initial_cov=jnp.array([[true_params["initial_cov"]]]),
+        transition_matrix=F,
+        transition_cov=Q,
+        observation_matrix=jnp.array([[1.0]]),
+        observation_cov=R
     )
+    xs, ys = kf.sample(rng_key, num_timesteps=num_timesteps)
+    return xs, ys
 
 
-def model(observations):
-    phi = numpyro.sample("phi", Uniform(0.0, 1.0))
-    sigma = numpyro.sample("sigma", HalfNormal())
-    mu = numpyro.sample("mu", Normal())
+def test_infer_state_space_parameters_with_numpyro(random_key):
+    true_params = {
+        "F": 0.95,
+        "Q": 0.1,
+        "R": 0.5,
+        "initial_mean": 0.0,
+        "initial_cov": 1.0
+    }
 
-    obs_std = jnp.array(0.1)
+    rng_key, data_key = jax.random.split(random_key)
+    xs, ys = _simulate_data(true_params, data_key, num_timesteps=100)
 
-    A = phi[None, None]
-    Q = sigma[None, None] ** 2
+    def model(observations):
+        F = numpyro.sample("F", dist.Beta(2.0, 1.0))
 
-    C = jnp.array([[1.0]])
-    R = obs_std[None, None] ** 2
+        sigma_dist = dist.TransformedDistribution(
+            dist.Normal().expand((2,)),
+            [dist.transforms.OrderedTransform(), dist.transforms.ExpTransform()]
+        )
+        Q, R = numpyro.sample("sigmas", sigma_dist)
 
-    transition_offset = (mu * (1.0 - phi))[None]
-    observation_offset = None
+        kf = KalmanFilter(
+            initial_mean=jnp.array([true_params["initial_mean"]]),
+            initial_cov=jnp.array([[true_params["initial_cov"]]]),
+            transition_matrix=jnp.array([[F]]),
+            transition_cov=jnp.array([[Q]]),
+            observation_matrix=jnp.array([[1.0]]),
+            observation_cov=jnp.array([[R]])
+        )
 
-    initial_mean = mu[None]
-    initial_cov = (sigma**2.0 / (1.0 - phi**2.0))[None, None]
-
-    kf = build_filter(A, C, Q, R, initial_mean, initial_cov, transition_offset, observation_offset)
-
-    means, _, ll = kf.filter(observations)
-    numpyro.factor("obs_ll", ll)
-    numpyro.deterministic("x", means)
-
-    return
-
-
-@pytest.mark.parametrize("num_warmup,num_samples", [(500, 500)])
-def test_numpyro_parameter_inference(simulated_data, ar1_true_params, num_warmup, num_samples):
-    states, observations = simulated_data
-    phi_true, sigma_true, mu_true, obs_std_true = ar1_true_params
+        ll = kf.filter(observations)[2]
+        numpyro.factor("kalman_likelihood", ll)
 
     kernel = NUTS(model)
-    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, chain_method="parallel", num_chains=4)
-    mcmc.run(jax.random.PRNGKey(0), observations)
-    samples = mcmc.get_samples()
+    mcmc = MCMC(kernel, num_warmup=1_000, num_samples=500, num_chains=2, progress_bar=False)
 
-    phi_est = np.mean(samples["phi"])
-    sigma_est = np.mean(samples["sigma"])
-    mu_est = np.mean(samples["mu"])
+    rng_key, mcmc_key = jax.random.split(rng_key)
+    mcmc.run(mcmc_key, observations=ys)
 
-    # Check that posterior means are close to true parameters
-    # With enough samples and a well-posed model, they should be reasonably close.
-    assert jnp.abs(phi_est - phi_true) < 0.05, f"phi estimate off: {phi_est}, true: {phi_true}"
-    assert jnp.abs(sigma_est - sigma_true) < 0.01, f"sigma estimate off: {sigma_est}, true: {sigma_true}"
-    assert jnp.abs(mu_est - mu_true) < 0.05, f"mu estimate off: {mu_est}, true: {mu_true}"
+    posterior_samples = mcmc.get_samples()
+
+    F_mean = jnp.mean(posterior_samples["F"])
+    Q_mean, R_mean = jnp.mean(posterior_samples["sigmas"], axis=0)
+
+    assert pytest.approx(true_params["F"], abs=0.1) == F_mean
+    assert pytest.approx(true_params["Q"], abs=0.02) == Q_mean
+    assert pytest.approx(true_params["R"], abs=0.05) == R_mean
