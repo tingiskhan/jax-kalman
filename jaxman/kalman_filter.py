@@ -1,8 +1,9 @@
+from typing import Any, Optional, Tuple
+
 import jax
 import jax.numpy as jnp
-from jax import lax
 import numpyro.distributions as dist
-from typing import Optional, Tuple, Any
+from jax import lax
 
 
 def _inflate_missing(
