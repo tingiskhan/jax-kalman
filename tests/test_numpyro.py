@@ -29,12 +29,12 @@ def simulated_data(ar1_true_params):
     rng = np.random.RandomState(0)
 
     states = np.zeros(n_timesteps)
-    states[0] = mu + sigma / np.sqrt(1.0 - phi ** 2.0) * rng.randn()
+    states[0] = mu + sigma / np.sqrt(1.0 - phi**2.0) * rng.randn()
 
     alpha = mu * (1.0 - phi)
 
     for t in range(1, n_timesteps):
-        states[t] = alpha + phi * states[t-1] + sigma * rng.randn()
+        states[t] = alpha + phi * states[t - 1] + sigma * rng.randn()
 
     observations = states + obs_std * rng.randn(n_timesteps)
     return states, observations
@@ -50,7 +50,7 @@ def build_filter(A, C, Q, R, initial_mean, initial_cov, transition_offset, obser
         initial_state_mean=initial_mean,
         initial_state_covariance=initial_cov,
         transition_offset=transition_offset,
-        observation_offset=observation_offset
+        observation_offset=observation_offset,
     )
 
 
@@ -62,16 +62,16 @@ def model(observations):
     obs_std = jnp.array(0.1)
 
     A = phi[None, None]
-    Q = sigma[None, None]**2
+    Q = sigma[None, None] ** 2
 
     C = jnp.array([[1.0]])
-    R = obs_std[None, None]**2
+    R = obs_std[None, None] ** 2
 
     transition_offset = (mu * (1.0 - phi))[None]
     observation_offset = None
 
     initial_mean = mu[None]
-    initial_cov = (sigma ** 2.0 / (1.0 - phi**2.0))[None, None]
+    initial_cov = (sigma**2.0 / (1.0 - phi**2.0))[None, None]
 
     kf = build_filter(A, C, Q, R, initial_mean, initial_cov, transition_offset, observation_offset)
 
