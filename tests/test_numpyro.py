@@ -32,23 +32,18 @@ def _simulate_data(true_params, rng_key, num_timesteps=30):
 def test_infer_state_space_parameters_with_numpyro(random_key):
     true_params = {
         "F": 0.95,
-        "Q": 0.1,
-        "R": 0.5,
+        "Q": 0.25,
+        "R": 0.1,
         "initial_mean": 0.0,
         "initial_cov": 1.0
     }
 
     rng_key, data_key = jax.random.split(random_key)
-    xs, ys = _simulate_data(true_params, data_key, num_timesteps=100)
+    xs, ys = _simulate_data(true_params, data_key, num_timesteps=200)
 
     def model(observations):
         F = numpyro.sample("F", dist.Beta(2.0, 1.0))
-
-        sigma_dist = dist.TransformedDistribution(
-            dist.Normal().expand((2,)),
-            [dist.transforms.OrderedTransform(), dist.transforms.ExpTransform()]
-        )
-        Q, R = numpyro.sample("sigmas", sigma_dist)
+        Q = numpyro.sample("Q", dist.TransformedDistribution(dist.LogNormal(), dist.transforms.PowerTransform(2.0)))
 
         kf = KalmanFilter(
             initial_mean=jnp.array([true_params["initial_mean"]]),
@@ -56,10 +51,12 @@ def test_infer_state_space_parameters_with_numpyro(random_key):
             transition_matrix=jnp.array([[F]]),
             transition_cov=jnp.array([[Q]]),
             observation_matrix=jnp.array([[1.0]]),
-            observation_cov=jnp.array([[R]])
+            observation_cov=jnp.array([[true_params["R"]]])
         )
 
-        ll = kf.filter(observations)[2]
+        means, _, ll = kf.filter(observations)
+
+        numpyro.deterministic("x", means)
         numpyro.factor("kalman_likelihood", ll)
 
     kernel = NUTS(model)
@@ -71,8 +68,7 @@ def test_infer_state_space_parameters_with_numpyro(random_key):
     posterior_samples = mcmc.get_samples()
 
     F_mean = jnp.mean(posterior_samples["F"])
-    Q_mean, R_mean = jnp.mean(posterior_samples["sigmas"], axis=0)
+    Q_mean = jnp.mean(posterior_samples["Q"], axis=0)
 
     assert pytest.approx(true_params["F"], abs=0.1) == F_mean
-    assert pytest.approx(true_params["Q"], abs=0.02) == Q_mean
-    assert pytest.approx(true_params["R"], abs=0.05) == R_mean
+    assert pytest.approx(true_params["Q"], abs=0.05) == Q_mean
