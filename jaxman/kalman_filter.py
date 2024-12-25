@@ -138,14 +138,8 @@ class KalmanFilter:
         return mean_pred, cov_pred
 
     def _update(
-        self, mean_pred: jnp.ndarray, cov_pred: jnp.ndarray, obs: jnp.ndarray, t: int, missing_value: float
+        self, mean_pred: jnp.ndarray, cov_pred: jnp.ndarray, obs_masked: jnp.ndarray, H_masked: jnp.ndarray, R_masked: jnp.ndarray
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        H_t = self._get_observation_matrix(t)
-        R_t = self._get_observation_cov(t)
-
-        mask = jnp.isnan(obs)
-        obs_masked, H_masked, R_masked = _inflate_missing(mask, obs, H_t, R_t, missing_value)
-
         S = H_masked @ cov_pred @ H_masked.T + R_masked
         S_pinv = jnp.linalg.pinv(S)
 
@@ -160,30 +154,30 @@ class KalmanFilter:
     def _forward_pass(
         self, observations: jnp.ndarray, missing_value: float
     ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        def scan_fn(carry, obs_tp1):
-            t, mean_t, cov_t, ll_t = carry
+        def scan_fn(carry, obs_t):
+            t, mean_tm1, cov_tm1, ll_tm1 = carry
 
-            mean_pred, cov_pred = self._predict(mean_t, cov_t, t)
+            mean_t, cov_t = self._predict(mean_tm1, cov_tm1, t)
 
             H_t = self._get_observation_matrix(t)
             R_t = self._get_observation_cov(t)
             d_t = self._get_observation_offset(t)
 
-            obs_mask = jnp.isnan(obs_tp1)
-            obs_masked, H_masked, R_masked = _inflate_missing(obs_mask, obs_tp1, H_t, R_t, missing_value)
+            obs_mask = jnp.isnan(obs_t)
+            obs_masked, H_masked, R_masked = _inflate_missing(obs_mask, obs_t, H_t, R_t, missing_value)
 
-            pred_mean_masked = H_masked @ mean_pred + jnp.where(jnp.isnan(obs_tp1), 0.0, d_t)
-            pred_cov_masked = H_masked @ cov_pred @ H_masked.T + R_masked
+            pred_mean_masked = H_masked @ mean_t + jnp.where(obs_mask, 0.0, d_t)
+            pred_cov_masked = H_masked @ cov_t @ H_masked.T + R_masked
 
             dist_y = dist.MultivariateNormal(loc=pred_mean_masked, covariance_matrix=pred_cov_masked)
             step_log_prob = dist_y.log_prob(obs_masked)
-            ll_tp1 = ll_t + step_log_prob
+            ll_t = ll_tm1 + step_log_prob
 
-            mean_up, cov_up = self._update(mean_pred, cov_pred, obs_tp1, t, missing_value)
+            corrected_mean_t, corrected_cov_t = self._update(mean_t, cov_t, obs_masked, H_masked, R_masked)
 
-            return (t + 1, mean_up, cov_up, ll_tp1), (mean_pred, cov_pred, mean_up, cov_up)
+            return (t + 1, corrected_mean_t, corrected_cov_t, ll_t), (mean_t, cov_t, corrected_mean_t, corrected_cov_t)
 
-        init_carry = (0, self.initial_mean, self.initial_cov, 0.0)
+        init_carry = (1, self.initial_mean, self.initial_cov, 0.0)
         final_carry, outputs = lax.scan(scan_fn, init_carry, observations)
 
         _, _, _, total_ll = final_carry
