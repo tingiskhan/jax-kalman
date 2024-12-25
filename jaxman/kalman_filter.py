@@ -260,7 +260,7 @@ class KalmanFilter:
         """
 
         def sample_step(carry, _):
-            t, x_prev = carry
+            t, x_prev, rng_prev = carry
 
             F_t = self._get_transition_matrix(t, x_prev)
             Q_t = self._get_transition_cov(t)
@@ -270,7 +270,7 @@ class KalmanFilter:
             R_t = self._get_observation_cov(t)
             d_t = self._get_observation_offset(t)
 
-            rng_proc, rng_obs = jax.random.split(rng_key)
+            rng_proc, rng_obs = jax.random.split(rng_prev)
             noise_dim = Q_t.shape[0]
             w_t = dist.MultivariateNormal(loc=jnp.zeros(noise_dim), covariance_matrix=Q_t).sample(rng_proc)
 
@@ -280,13 +280,13 @@ class KalmanFilter:
 
             y_t = H_t @ x_t + d_t + v_t
 
-            return (t + 1, x_t), (x_t, y_t)
+            return (t + 1, x_t, rng_proc), (x_t, y_t)
 
         def init_state(key):
             return dist.MultivariateNormal(loc=self.initial_mean, covariance_matrix=self.initial_cov).sample(key)
 
         x0 = init_state(rng_key)
-        init_carry = (0, x0)
+        init_carry = (0, x0, rng_key)
 
         _, (xs, ys) = lax.scan(sample_step, init_carry, None, length=num_timesteps)
 
