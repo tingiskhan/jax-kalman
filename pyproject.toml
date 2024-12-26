@@ -20,6 +20,7 @@ requires-python = ">=3.9"
 dependencies = [
     "numpyro",
     "jax",
+    "jaxtyping",
 ]
 
 [project.optional-dependencies]
