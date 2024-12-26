@@ -4,8 +4,8 @@ import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax import lax
-from jaxtyping import Array, Float
 from jax.tree_util import register_pytree_node_class
+from jaxtyping import Array, Float
 
 from .results import FilterResult, SmoothingResult
 
