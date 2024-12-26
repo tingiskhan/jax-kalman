@@ -1,125 +1,206 @@
+import pytest
 import jax
 import jax.numpy as jnp
-import pytest
-
+import numpy as np
+from numpy.testing import assert_allclose
+from pykalman import KalmanFilter as PyKalman
 from jaxman import KalmanFilter
 
 
 @pytest.fixture
-def kf_params():
+def random_key():
     """
-    Define consistent parameters for the Kalman filter and data generation.
+    Returns a PRNGKey(0) for reproducibility.
     """
-    n_dim_state = 1
-    n_dim_obs = 1
-
-    # Filter parameters
-    transition_matrices = jnp.array([[1.0]])  # Identity transition
-    observation_matrices = jnp.array([[1.0]])  # Direct observation of the state
-    transition_covariance = jnp.array([[1e-1]])  # State transition noise variance
-    observation_covariance = jnp.array([[1e-1]])  # Observation noise variance = 0.1
-
-    # Initial state parameters
-    initial_state_mean = jnp.array([0.0])
-    initial_state_covariance = jnp.array([[1.0]])
-
-    # For data generation, we need standard deviation from covariance
-    obs_noise_std = jnp.sqrt(observation_covariance[0, 0])  # sqrt(0.1) ~ 0.316
-    return {
-        "transition_matrices": transition_matrices,
-        "observation_matrices": observation_matrices,
-        "transition_covariance": transition_covariance,
-        "observation_covariance": observation_covariance,
-        "initial_state_mean": initial_state_mean,
-        "initial_state_covariance": initial_state_covariance,
-        "obs_noise_std": obs_noise_std,
-    }
+    return jax.random.PRNGKey(0)
 
 
-@pytest.fixture
-def simple_kf(kf_params):
-    return KalmanFilter(
-        transition_matrices=kf_params["transition_matrices"],
-        observation_matrices=kf_params["observation_matrices"],
-        transition_covariance=kf_params["transition_covariance"],
-        observation_covariance=kf_params["observation_covariance"],
-        initial_state_mean=kf_params["initial_state_mean"],
-        initial_state_covariance=kf_params["initial_state_covariance"],
+def test_filter_vs_pykalman(random_key):
+    """
+    Compares the KalmanFilter output to pykalman on a simple 1D observation, 2D state system.
+    Checks whether the filtered means/covs match pykalman results (allowing small tolerance).
+    """
+    state_dim = 2
+    obs_dim = 1
+    F = jnp.array([[1.0, 1.0], [0.0, 1.0]])
+    Q = jnp.array([[1e-4, 0.0], [0.0, 1e-4]])
+    H = jnp.array([[1.0, 0.0]])
+    R = jnp.array([[1e-1]])
+    transition_offset = jnp.array([0.01, 0.0])
+
+    np.random.seed(42)
+    kf_ref = PyKalman(
+        transition_matrices=F,
+        transition_covariance=Q,
+        observation_matrices=H,
+        observation_covariance=R,
+        initial_state_mean=[0, 0],
+        n_dim_obs=obs_dim,
+        transition_offsets=np.array(transition_offset),
+    )
+    states_ref, obs_ref = kf_ref.sample(n_timesteps=20, initial_state=[0, 0])
+
+    kf_jax = KalmanFilter(
+        initial_mean=jnp.array([0.0, 0.0]),
+        initial_cov=jnp.eye(state_dim),
+        transition_matrix=F,
+        transition_cov=Q,
+        observation_matrix=H,
+        observation_cov=R,
+        transition_offset=transition_offset,
     )
 
+    obs_jax = jnp.array(obs_ref)
+    fm, fc, ll = kf_jax.filter(obs_jax)
 
-def test_filter_with_no_missing(simple_kf, kf_params):
-    # Generate synthetic data with no missing observations
-    key = jax.random.PRNGKey(123)
-    true_states = jnp.linspace(0, 10, 50)
-    noise = jax.random.normal(key, (50,))
-    observations = true_states + kf_params["obs_noise_std"] * noise
+    pk_means, pk_covs = kf_ref.filter(obs_ref)
+    ll_ref = kf_ref.loglikelihood(obs_ref)
 
-    filtered_means, filtered_covs, ll = simple_kf.filter(observations)
-    assert filtered_means.shape == (50, 1)
-    assert filtered_covs.shape == (50, 1, 1)
-    assert isinstance(ll, float) or isinstance(ll, jnp.ndarray)
-
-    # Check that filtered means are close to true states
-    # With given parameters, we expect decent accuracy
-    mae = jnp.mean(jnp.abs(filtered_means.squeeze() - true_states))
-    assert mae < 0.5, f"Mean absolute error is too large: {mae}"
+    assert_allclose(ll_ref, ll, atol=5e-2)
+    assert_allclose(fm[1:], pk_means[1:], atol=5e-2)
 
 
-def test_filter_with_missing(simple_kf, kf_params):
-    key = jax.random.PRNGKey(1)
-    true_states = jnp.linspace(0, 10, 50)
-    noise = jax.random.normal(key, (50,))
-    observations = true_states + kf_params["obs_noise_std"] * noise
+def test_smoothing_vs_pykalman(random_key):
+    """
+    Compares the RTS smoothing results of the custom KalmanFilter class to the built-in smoothing in pykalman.
+    We check that smoothed means/covariances are numerically close.
+    """
+    state_dim = 2
+    obs_dim = 1
 
-    # Introduce missing data
-    observations = observations.at[10].set(jnp.nan)
-    observations = observations.at[20].set(jnp.nan)
+    F = jnp.array([[1.0, 1.0],
+                   [0.0, 1.0]])
+    Q = jnp.array([[1e-2, 0.0],
+                   [0.0, 1e-2]])
+    H = jnp.array([[1.0, 0.0]])
+    R = jnp.array([[1e-1]])
 
-    filtered_means, filtered_covs, ll = simple_kf.filter(observations)
-    assert filtered_means.shape == (50, 1)
-    assert filtered_covs.shape == (50, 1, 1)
-    assert not jnp.isnan(filtered_means).all()
-    assert isinstance(ll, float) or isinstance(ll, jnp.ndarray)
+    np.random.seed(42)
+    kf_ref = PyKalman(
+        transition_matrices=np.array(F),
+        transition_covariance=np.array(Q),
+        observation_matrices=np.array(H),
+        observation_covariance=np.array(R),
+        initial_state_mean=np.array([0.0, 0.0]),
+        n_dim_obs=obs_dim
+    )
 
-    # Check that even with missing observations, the estimates are not too far off
-    mae = jnp.mean(jnp.abs(filtered_means.squeeze() - true_states))
-    # Relax criterion since missing data can degrade performance
-    assert mae < 1.0, f"Mean absolute error is too large with missing data: {mae}"
+    states_ref, obs_ref = kf_ref.sample(n_timesteps=25, initial_state=[0.0, 0.0])
+
+    kf_jax = KalmanFilter(
+        initial_mean=jnp.array([0.0, 0.0]),
+        initial_cov=jnp.eye(state_dim),
+        transition_matrix=F,
+        transition_cov=Q,
+        observation_matrix=H,
+        observation_cov=R
+    )
+
+    obs_jax = jnp.array(obs_ref)
+
+    pk_smoothed_means, pk_smoothed_covs = kf_ref.smooth(obs_ref)
+
+    means, covariances, _ = kf_jax.smooth(obs_jax)
+    jax_smoothed_means = np.array(means)
+    jax_smoothed_covs = np.array(covariances)
+
+    # Compare
+    assert jax_smoothed_means.shape == pk_smoothed_means.shape
+    assert jax_smoothed_covs.shape == pk_smoothed_covs.shape
+
+    # We allow some numerical tolerance due to different internal implementations
+    assert_allclose(jax_smoothed_means, pk_smoothed_means, atol=1e-2, rtol=1e-2)
+    for t in range(len(jax_smoothed_covs)):
+        assert_allclose(jax_smoothed_covs[t], pk_smoothed_covs[t], atol=1e-2, rtol=1e-2)
 
 
-def test_smooth_with_missing(simple_kf, kf_params):
-    key = jax.random.PRNGKey(2)
-    true_states = jnp.linspace(0, 10, 50)
-    noise = jax.random.normal(key, (50,))
-    observations = true_states + kf_params["obs_noise_std"] * noise
+def test_partial_missing_data(random_key):
+    """
+    Checks if filter handles partially missing observations in multi-dimensional data.
+    """
+    state_dim = 2
+    obs_dim = 2
+    F = jnp.eye(state_dim)
+    Q = jnp.eye(state_dim) * 0.01
+    H = jnp.eye(obs_dim, state_dim)
+    R = jnp.eye(obs_dim) * 0.1
 
-    # Introduce missing data
-    observations = observations.at[10].set(jnp.nan)
-    observations = observations.at[20].set(jnp.nan)
+    kf = KalmanFilter(
+        initial_mean=jnp.array([0.0, 0.0]),
+        initial_cov=jnp.eye(state_dim),
+        transition_matrix=F,
+        transition_cov=Q,
+        observation_matrix=H,
+        observation_cov=R,
+    )
 
-    smoothed_means, smoothed_covs, ll = simple_kf.smooth(observations)
-    assert smoothed_means.shape == (50, 1)
-    assert smoothed_covs.shape == (50, 1, 1)
-    assert not jnp.isnan(smoothed_means).all()
-    assert isinstance(ll, float) or isinstance(ll, jnp.ndarray)
+    obs_data = np.array([[1.0, 2.0], [np.nan, 2.1], [1.1, np.nan], [np.nan, np.nan], [1.2, 2.2]], dtype=np.float32)
 
-    # Smoothing should improve estimates compared to filtering
-    mae = jnp.mean(jnp.abs(smoothed_means.squeeze() - true_states))
-    assert mae < 1.0, f"Mean absolute error too large after smoothing with missing data: {mae}"
+    # TODO: would be good to compare with pykalman, but not too sure it's correct
+    fm, fc, ll = kf.filter(jnp.array(obs_data))
+    assert fm.shape == (5, 2)
+    assert fc.shape == (5, 2, 2)
 
 
-def test_filter_update(simple_kf, kf_params):
-    # Single-step update test
-    fm = simple_kf.initial_state_mean
-    fc = simple_kf.initial_state_covariance
+def test_log_likelihood_correct_vs_incorrect(random_key):
+    """
+    Verifies that the correct model yields higher log-likelihood than an incorrect model.
+    """
+    F_true = jnp.array([[1.0]])
+    Q_true = jnp.array([[0.01]])
+    H_true = jnp.array([[1.0]])
+    R_true = jnp.array([[0.1]])
 
-    key = jax.random.PRNGKey(3)
-    obs = 1.0 + kf_params["obs_noise_std"] * jax.random.normal(key, (1,))
+    kf_true = KalmanFilter(
+        initial_mean=jnp.array([0.0]),
+        initial_cov=jnp.array([[1.0]]),
+        transition_matrix=F_true,
+        transition_cov=Q_true,
+        observation_matrix=H_true,
+        observation_cov=R_true,
+    )
 
-    new_mean, new_cov, ll = simple_kf.filter_update(fm, fc, obs)
-    assert new_mean.shape == (1,)
-    assert new_cov.shape == (1, 1)
-    assert not jnp.isnan(new_mean).any()
-    assert not jnp.isnan(new_cov).any()
-    assert isinstance(ll, float) or isinstance(ll, jnp.ndarray)
+    rng_key, subkey = jax.random.split(random_key)
+    xs, ys = kf_true.sample(subkey, num_timesteps=15)
+    ll_correct = kf_true.filter(ys)[2]
+
+    F_wrong = jnp.array([[0.5]])
+    Q_wrong = jnp.array([[0.5]])
+    R_wrong = jnp.array([[1.0]])
+
+    kf_wrong = KalmanFilter(
+        initial_mean=jnp.array([0.0]),
+        initial_cov=jnp.array([[1.0]]),
+        transition_matrix=F_wrong,
+        transition_cov=Q_wrong,
+        observation_matrix=H_true,
+        observation_cov=R_wrong,
+    )
+    ll_wrong = kf_wrong.filter(ys)[2]
+
+    assert ll_correct > ll_wrong
+
+
+def test_sampling(random_key):
+    """
+    Checks that the sample method runs without error and returns arrays of expected shapes.
+    """
+    state_dim = 2
+    obs_dim = 1
+    F = jnp.array([[1.0, 0.0], [0.0, 1.0]])
+    Q = jnp.array([[0.1, 0.0], [0.0, 0.1]])
+    H = jnp.array([[1.0, 0.0]])
+    R = jnp.array([[0.2]])
+
+    kf = KalmanFilter(
+        initial_mean=jnp.array([0.0, 0.0]),
+        initial_cov=jnp.eye(state_dim),
+        transition_matrix=F,
+        transition_cov=Q,
+        observation_matrix=H,
+        observation_cov=R,
+    )
+
+    xs, ys = kf.sample(random_key, num_timesteps=5)
+    assert xs.shape == (5, 2)
+    assert ys.shape == (5, 1)

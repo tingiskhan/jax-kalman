@@ -1,285 +1,340 @@
-from typing import Optional, Tuple
+from typing import Tuple
 
+import jax
 import jax.numpy as jnp
+import numpyro.distributions as dist
 from jax import lax
-from numpyro.distributions import MultivariateNormal
+from jax.tree_util import register_pytree_node_class
+from jaxtyping import Array, Float
+
+from .results import FilterResult, SmoothingResult
 
 
+def _inflate_missing(non_valid_mask: jnp.ndarray, r: jnp.ndarray, missing_value: float = 1e12) -> jnp.ndarray:
+    """
+    Masks missing dimensions by zeroing corresponding rows of H and inflating the diagonal of R.
+
+    Args:
+        non_valid_mask: Boolean mask of shape (obs_dim,) indicating missing dimensions.
+        r: Observation covariance matrix of shape (obs_dim, obs_dim).
+        missing_value: Large scalar to add on the diagonal for missing dimensions.
+
+    Returns:
+        A tuple of:
+          - obs_masked: Same shape as obs, with missing entries replaced by 0.0.
+          - H_masked: Same shape as H, rows zeroed out for missing dimensions.
+          - r_masked: Same shape as R, diagonal entries inflated for missing dimensions.
+    """
+
+    diag_inflation = jnp.where(non_valid_mask, missing_value, 0.0)
+    r_masked = r + jnp.diag(diag_inflation)
+
+    return r_masked
+
+
+@register_pytree_node_class
 class KalmanFilter:
     """
-    A JAX-based Kalman Filter class with a similar API to pykalman.KalmanFilter.
+    A JAX-based Kalman Filter supporting partial missing data, offsets, optional noise transform,
+    integrated log-likelihood, and RTS smoothing. Uses pseudo-inverse to handle degenerate covariances.
 
-    Features:
-    - Uses jnp.linalg.solve instead of directly computing matrix inverses to improve numerical stability.
-    - Applies the Joseph form for covariance updates for better numerical robustness.
-    - Handles missing observations by replacing them with the predicted observation means.
-    - Computes the log-likelihood of the observed data under the linear-Gaussian model using numpyro distributions.
-    - Supports optional transition and observation offsets.
+    Args:
+        initial_mean: Mean of the initial state, shape (state_dim,).
+        initial_cov: Covariance of the initial state, shape (state_dim, state_dim).
+        transition_matrix: F_t, shape (state_dim, state_dim) or callable returning it.
+        transition_cov: Q_t, shape (noise_dim, noise_dim) or callable returning it.
+        observation_matrix: H_t, shape (obs_dim, state_dim) or callable returning it.
+        observation_cov: R_t, shape (obs_dim, obs_dim) or callable returning it.
+        transition_offset: b_t, shape (state_dim,) or callable returning it. Default is None.
+        observation_offset: d_t, shape (obs_dim,) or callable returning it. Default is None.
+        noise_transform: G_t, shape (state_dim, noise_dim) or callable returning it.
+            If None, an identity matrix of size (state_dim, state_dim) is used.
+        variance_inflation: Inflation factor for missing dimensions in the observation covariance.
     """
 
     def __init__(
         self,
-        transition_matrices: jnp.ndarray,
-        observation_matrices: jnp.ndarray,
-        transition_covariance: jnp.ndarray,
-        observation_covariance: jnp.ndarray,
-        initial_state_mean: jnp.ndarray,
-        initial_state_covariance: jnp.ndarray,
-        transition_offset: Optional[jnp.ndarray] = None,
-        observation_offset: Optional[jnp.ndarray] = None,
-    ) -> None:
+        initial_mean: Float[Array, "state_dim"],  # noqa: 821
+        initial_cov: Float[Array, "state_dim state_dim"],  # noqa: F722
+        transition_matrix: Float[Array, "state_dim state_dim"],  # noqa: F722
+        transition_cov: Float[Array, "state_dim state_dim"],  # noqa: F722
+        observation_matrix: Float[Array, "obs_dim state_dim"],  # noqa: F722
+        observation_cov: Float[Array, "obs_dim obs_dim"],  # noqa: F722
+        transition_offset: Float[Array, "state_dim"] = None,  # noqa: F821
+        observation_offset: Float[Array, "obs_dim"] = None,  # noqa: F821
+        noise_transform: Float[Array, "state_dim noise_dim"] = None,  # noqa: F722
+        variance_inflation: float = 1e8,
+    ):
+        self.initial_mean = initial_mean
+        self.initial_cov = initial_cov
+
+        self.transition_matrix = transition_matrix
+        self.transition_cov = transition_cov
+        self.observation_matrix = observation_matrix
+        self.observation_cov = observation_cov
+
+        self.transition_offset = transition_offset if transition_offset is not None else jnp.zeros(1)
+        self.observation_offset = observation_offset if observation_offset is not None else jnp.zeros(1)
+
+        if noise_transform is None:
+            state_dim = initial_mean.shape[0]
+            noise_transform = jnp.eye(state_dim)
+
+        self.noise_transform = noise_transform
+        self.variance_inflation = variance_inflation
+
+    def tree_flatten(self):
         """
-        Initialize the Kalman filter parameters.
-
-        Parameters
-        ----------
-        transition_matrices : jnp.ndarray of shape (n_dim_state, n_dim_state)
-            State transition matrix (often denoted as A).
-        observation_matrices : jnp.ndarray of shape (n_dim_obs, n_dim_state)
-            Observation matrix (often denoted as C or H).
-        transition_covariance : jnp.ndarray of shape (n_dim_state, n_dim_state)
-            Covariance matrix of the process noise (often Q).
-        observation_covariance : jnp.ndarray of shape (n_dim_obs, n_dim_obs)
-            Covariance matrix of the observation noise (often R).
-        initial_state_mean : jnp.ndarray of shape (n_dim_state,)
-            Mean vector of the initial state distribution.
-        initial_state_covariance : jnp.ndarray of shape (n_dim_state, n_dim_state)
-            Covariance matrix of the initial state distribution.
-        transition_offset : jnp.ndarray of shape (n_dim_state,), optional
-            A constant offset added to the state after applying the transition matrix.
-        observation_offset : jnp.ndarray of shape (n_dim_obs,), optional
-            A constant offset added to the predicted observations after applying the observation matrix.
+        Splits the object into (children, aux_data).
+        children must be a tuple/list of JAX array leaves.
+        aux_data holds everything else needed to reconstruct the class.
         """
-        self.transition_matrices = jnp.array(transition_matrices)
-        self.observation_matrices = jnp.array(observation_matrices)
-        self.transition_covariance = jnp.array(transition_covariance)
-        self.observation_covariance = jnp.array(observation_covariance)
-        self.initial_state_mean = jnp.array(initial_state_mean)
-        self.initial_state_covariance = jnp.array(initial_state_covariance)
-
-        self.transition_offset = None if transition_offset is None else jnp.array(transition_offset)
-        self.observation_offset = None if observation_offset is None else jnp.array(observation_offset)
-
-        # Determine dimensions
-        self.n_dim_state: int = self.transition_matrices.shape[0]
-        self.n_dim_obs: int = self.observation_matrices.shape[0]
-
-    def _filter_step(
-        self, carry: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], obs_t: jnp.ndarray
-    ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
-        """
-        One step of the forward filtering using the Kalman filter equations.
-
-        Parameters
-        ----------
-        carry : tuple
-            A tuple (pred_mean, pred_cov, ll_cum) representing the predicted state mean,
-            predicted state covariance, and cumulative log-likelihood from previous steps.
-        obs_t : jnp.ndarray of shape (n_dim_obs,)
-            The observation at the current time step. NaNs represent missing values.
-
-        Returns
-        -------
-        new_carry : tuple
-            (new_mean, new_cov, new_ll_cum) The updated filtered state mean, covariance,
-            and cumulative log-likelihood after incorporating the current observation.
-        outputs : tuple
-            (new_mean, new_cov, log_likelihood_t) The filtered state mean and covariance
-            for the current time step, and the incremental log-likelihood.
-        """
-        a = self.transition_matrices
-        c = self.observation_matrices
-        q = self.transition_covariance
-        r = self.observation_covariance
-
-        pred_mean, pred_cov, ll_cum = carry
-
-        # Prediction step
-        pred_mean = a @ pred_mean
-        if self.transition_offset is not None:
-            pred_mean = pred_mean + self.transition_offset
-        pred_cov = a @ pred_cov @ a.T + q
-
-        # Identify missing observations and replace them with predicted means
-        mask = ~jnp.isnan(obs_t)
-
-        yhat = c @ pred_mean
-        if self.observation_offset is not None:
-            yhat = yhat + self.observation_offset
-
-        obs_t_filled = jnp.where(mask, obs_t, yhat)
-
-        # Compute innovation and S
-        innovation = obs_t_filled - yhat
-        s = c @ pred_cov @ c.T + r
-
-        # Compute log-likelihood increment
-        log_likelihood_t = MultivariateNormal(loc=yhat, covariance_matrix=s).log_prob(obs_t_filled)
-
-        # Compute Kalman gain using solve: S K^T = (C P)^T => K = (S \ (C P))^T
-        k = jnp.linalg.solve(s, (c @ pred_cov).T).T
-
-        # Joseph form for covariance
-        eye = jnp.eye(self.n_dim_state)
-        new_mean = pred_mean + k @ innovation
-        new_cov = (eye - k @ c) @ pred_cov @ (eye - k @ c).T + k @ r @ k.T
-
-        new_ll_cum = ll_cum + log_likelihood_t
-
-        return (new_mean, new_cov, new_ll_cum), (new_mean, new_cov, log_likelihood_t)
-
-    def filter(self, observations: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, float]:
-        """
-        Run the Kalman filter forward pass for a sequence of observations.
-
-        Parameters
-        ----------
-        observations : jnp.ndarray of shape (n_timesteps, n_dim_obs)
-            The observations over time, possibly containing NaN for missing values.
-
-        Returns
-        -------
-        filtered_state_means : jnp.ndarray of shape (n_timesteps, n_dim_state)
-            The filtered state means at each time step.
-        filtered_state_covariances : jnp.ndarray of shape (n_timesteps, n_dim_state, n_dim_state)
-            The filtered state covariances at each time step.
-        log_likelihood : float
-            The total log-likelihood of the observed data under the model.
-        """
-        observations = jnp.asarray(observations)
-        init_carry = (self.initial_state_mean, self.initial_state_covariance, 0.0)
-
-        (final_mean, final_cov, final_ll), (filtered_means, filtered_covs, _) = lax.scan(
-            self._filter_step, init_carry, observations
+        children = (
+            self.initial_mean,
+            self.initial_cov,
+            self.transition_matrix,
+            self.transition_cov,
+            self.observation_matrix,
+            self.observation_cov,
+            self.transition_offset,
+            self.observation_offset,
+            self.noise_transform,
         )
 
-        return filtered_means, filtered_covs, final_ll
+        aux_data = dict(variance_inflation=self.variance_inflation)
+        return children, aux_data
 
-    def _smooth_step(
-        self, carry: Tuple[jnp.ndarray, jnp.ndarray], args: Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
-    ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
         """
-        One step of the backward smoothing (RTS smoother).
-
-        Parameters
-        ----------
-        carry : tuple (next_smoothed_mean, next_smoothed_cov)
-            The smoothed mean and covariance from the next time step.
-        args : tuple (filtered_mean_t, filtered_cov_t, predicted_mean_next, predicted_cov_next)
-            Quantities from the forward pass and predictions for the next time step.
+        Reconstructs the class instance from aux_data (static) + children (JAX arrays).
+        The order of children must match tree_flatten above.
         """
-        a = self.transition_matrices
-        next_smoothed_mean, next_smoothed_cov = carry
-        filtered_mean_t, filtered_cov_t, predicted_mean_next, predicted_cov_next = args
+        (
+            initial_mean,
+            initial_cov,
+            transition_matrix,
+            transition_cov,
+            observation_matrix,
+            observation_cov,
+            transition_offset,
+            observation_offset,
+            noise_transform,
+        ) = children
 
-        # Compute J using solve
-        j = jnp.linalg.solve(predicted_cov_next, (a @ filtered_cov_t.T).T).T
-
-        smoothed_mean_t = filtered_mean_t + j @ (next_smoothed_mean - predicted_mean_next)
-        smoothed_cov_t = filtered_cov_t + j @ (next_smoothed_cov - predicted_cov_next) @ j.T
-
-        return (smoothed_mean_t, smoothed_cov_t), (smoothed_mean_t, smoothed_cov_t)
-
-    def smooth(self, observations: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, float]:
-        """
-        Apply RTS smoothing to the filtered estimates.
-
-        Parameters
-        ----------
-        observations : jnp.ndarray of shape (n_timesteps, n_dim_obs)
-
-        Returns
-        -------
-        smoothed_state_means : jnp.ndarray of shape (n_timesteps, n_dim_state)
-            The smoothed state means at each time step.
-        smoothed_state_covariances : jnp.ndarray of shape (n_timesteps, n_dim_state, n_dim_state)
-            The smoothed state covariances at each time step.
-        log_likelihood : float
-            The log-likelihood of the observed data, same as obtained from filtering.
-        """
-        observations = jnp.asarray(observations)
-        filtered_means, filtered_covs, ll = self.filter(observations)
-
-        a = self.transition_matrices
-        q = self.transition_covariance
-
-        # Compute predicted means and covariances
-        def pred_body(
-            carry: Tuple[jnp.ndarray, jnp.ndarray], x: Tuple[jnp.ndarray, jnp.ndarray]
-        ) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
-            pm, pc = carry
-            fm_t, fc_t = x
-            pm_next = a @ pm
-            if self.transition_offset is not None:
-                pm_next = pm_next + self.transition_offset
-            pc_next = a @ pc @ a.T + q
-            return (fm_t, fc_t), (pm_next, pc_next)
-
-        init_carry = (self.initial_state_mean, self.initial_state_covariance)
-        (_, _), (predicted_means, predicted_covs) = lax.scan(
-            pred_body, init_carry, (filtered_means[:-1], filtered_covs[:-1])
+        return cls(
+            initial_mean=initial_mean,
+            initial_cov=initial_cov,
+            transition_matrix=transition_matrix,
+            transition_cov=transition_cov,
+            observation_matrix=observation_matrix,
+            observation_cov=observation_cov,
+            transition_offset=transition_offset,
+            observation_offset=observation_offset,
+            noise_transform=noise_transform,
+            **aux_data,
         )
 
-        # Insert the first prediction at time 0
-        first_pm = a @ self.initial_state_mean
-        if self.transition_offset is not None:
-            first_pm = first_pm + self.transition_offset
-        first_pc = a @ self.initial_state_covariance @ a.T + q
-        predicted_means = jnp.concatenate([jnp.reshape(first_pm, (1, -1)), predicted_means], axis=0)
-        predicted_covs = jnp.concatenate(
-            [jnp.reshape(first_pc, (1, self.n_dim_state, self.n_dim_state)), predicted_covs], axis=0
-        )
+    def _get_transition_matrix(self, t: int, x_prev: jnp.ndarray) -> jnp.ndarray:
+        if callable(self.transition_matrix):
+            return self.transition_matrix(t, x_prev)
 
-        # Backward smoothing
-        final_carry = (filtered_means[-1], filtered_covs[-1])
-        args = (filtered_means[:-1], filtered_covs[:-1], predicted_means[1:], predicted_covs[1:])
-        rev_args = tuple(a[::-1] for a in args)
-        (sm_last_mean, sm_last_cov), (rev_sm_means, rev_sm_covs) = lax.scan(self._smooth_step, final_carry, rev_args)
+        return self.transition_matrix
 
-        smoothed_means = jnp.concatenate([rev_sm_means[::-1], jnp.reshape(sm_last_mean, (1, -1))], axis=0)
-        smoothed_covariances = jnp.concatenate(
-            [rev_sm_covs[::-1], jnp.reshape(sm_last_cov, (1, self.n_dim_state, self.n_dim_state))], axis=0
-        )
+    def _get_transition_cov(self, t: int) -> jnp.ndarray:
+        if callable(self.transition_cov):
+            return self.transition_cov(t)
 
-        return smoothed_means, smoothed_covariances, ll
+        return self.transition_cov
 
-    def filter_update(
+    def _get_observation_matrix(self, t: int) -> jnp.ndarray:
+        if callable(self.observation_matrix):
+            return self.observation_matrix(t)
+
+        return self.observation_matrix
+
+    def _get_observation_cov(self, t: int) -> jnp.ndarray:
+        if callable(self.observation_cov):
+            return self.observation_cov(t)
+
+        return self.observation_cov
+
+    def _get_transition_offset(self, t: int) -> jnp.ndarray:
+        if callable(self.transition_offset):
+            return self.transition_offset(t)
+
+        return self.transition_offset
+
+    def _get_observation_offset(self, t: int) -> jnp.ndarray:
+        if callable(self.observation_offset):
+            return self.observation_offset(t)
+
+        return self.observation_offset
+
+    def _get_noise_transform(self, t: int) -> jnp.ndarray:
+        if callable(self.noise_transform):
+            return self.noise_transform(t)
+
+        return self.noise_transform
+
+    def _predict(self, mean: jnp.ndarray, cov: jnp.ndarray, t: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        F_t = self._get_transition_matrix(t, mean)
+        Q_t = self._get_transition_cov(t)
+        b_t = self._get_transition_offset(t)
+        G_t = self._get_noise_transform(t)
+
+        mean_pred = F_t @ mean + b_t
+        cov_pred = F_t @ cov @ F_t.T + G_t @ Q_t @ G_t.T
+
+        return mean_pred, cov_pred
+
+    def _update(
         self,
-        filtered_state_mean: jnp.ndarray,
-        filtered_state_covariance: jnp.ndarray,
-        observation: Optional[jnp.ndarray] = None,
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        mean_pred: jnp.ndarray,
+        cov_pred: jnp.ndarray,
+        obs_t: jnp.ndarray,
+        h: jnp.ndarray,
+        s_inverse: jnp.ndarray,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        gain = cov_pred @ h.T @ s_inverse
+        residual = obs_t - h @ mean_pred
+
+        corrected_mean = mean_pred + gain @ residual
+        corrected_cov = cov_pred - gain @ h @ cov_pred
+
+        return corrected_mean, corrected_cov
+
+    def _forward_pass(
+        self, observations: jnp.ndarray
+    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        def scan_fn(carry, obs_t):
+            t, mean_tm1, cov_tm1, ll_tm1 = carry
+
+            x_pred_mean, x_pred_cov = self._predict(mean_tm1, cov_tm1, t)
+
+            h_t = self._get_observation_matrix(t)
+            r_t = self._get_observation_cov(t)
+            d_t = self._get_observation_offset(t)
+
+            nan_mask = jnp.isnan(obs_t)
+
+            # TODO: need to verify this...
+            r_t = _inflate_missing(nan_mask, r_t, missing_value=self.variance_inflation)
+
+            y_pred_mean = h_t @ x_pred_mean + d_t
+            y_pred_cov = h_t @ x_pred_cov @ h_t.T + r_t
+
+            obs_masked = jnp.where(nan_mask, y_pred_mean, obs_t)
+            s_inv = jnp.linalg.pinv(y_pred_cov)
+
+            dist_y = dist.MultivariateNormal(loc=y_pred_mean, covariance_matrix=y_pred_cov)
+            step_log_prob = dist_y.log_prob(obs_masked)
+            ll_t = ll_tm1 + step_log_prob
+
+            corrected_mean_t, corrected_cov_t = self._update(x_pred_mean, x_pred_cov, obs_masked, h_t, s_inv)
+
+            carry_t = (t + 1, corrected_mean_t, corrected_cov_t, ll_t)
+            return carry_t, (x_pred_mean, x_pred_cov, corrected_mean_t, corrected_cov_t)
+
+        init_carry = (1, self.initial_mean, self.initial_cov, 0.0)
+        final_carry, (predicted_means, predicted_covs, filtered_means, filtered_covs) = lax.scan(
+            scan_fn, init_carry, observations
+        )
+
+        _, _, _, total_ll = final_carry
+
+        return predicted_means, predicted_covs, filtered_means, filtered_covs, total_ll
+
+    def filter(self, observations: jnp.ndarray) -> FilterResult:
         """
-        Update the Kalman filter with a single new observation step.
-
-        Parameters
-        ----------
-        filtered_state_mean : jnp.ndarray of shape (n_dim_state,)
-            The previous filtered state mean.
-        filtered_state_covariance : jnp.ndarray of shape (n_dim_state, n_dim_state)
-            The previous filtered state covariance.
-        observation : jnp.ndarray of shape (n_dim_obs,), optional
-            The new observation. If None or NaN values are present, missing entries are replaced by
-            the predicted observation means.
-
-        Returns
-        -------
-        new_filtered_state_mean : jnp.ndarray of shape (n_dim_state,)
-            The updated filtered state mean after incorporating the new observation.
-        new_filtered_state_covariance : jnp.ndarray of shape (n_dim_state, n_dim_state)
-            The updated filtered state covariance.
-        log_likelihood_t : float
-            The log-likelihood contribution of this single observation step.
+        Runs forward filtering over a sequence of observations, returning a named tuple
+        FilterResult(means, covariances, log_likelihood).
         """
-        if observation is None:
-            observation = jnp.full((self.n_dim_obs,), jnp.nan)
 
-        carry = (filtered_state_mean, filtered_state_covariance, 0.0)
-        state, _ = self._filter_step(carry, observation)
+        (_, __, filtered_means, filtered_covs, total_ll) = self._forward_pass(observations)
 
-        return state
+        return FilterResult(filtered_means, filtered_covs, total_ll)
 
+    # TODO: fix
+    def smooth(self, observations: jnp.ndarray, missing_value: float = 1e12) -> SmoothingResult:
+        """
+        Runs forward filtering + RTS backward pass for smoothing, returning SmoothResult(means, covariances, log_likelihood).
 
-__all__ = [
-    "KalmanFilter",
-]
+        The backward pass uses a reverse-time lax.scan to fill in smoothed results for each time step.
+        """
+        predicted_means, predicted_covs, filter_means, filter_covs, ll = self._forward_pass(observations)
+
+        def rts_step(carry, aux_t):
+            """
+            carry: (mean_next, cov_next, smeans, scovs)
+            t_rev: the reversed time index, e.g. from T-2 down to 0
+            """
+            mean_next, cov_next = carry
+            t, mean_f, cov_f, mean_p, cov_p = aux_t
+
+            f_t = self._get_transition_matrix(t + 1, mean_f)
+            cov_inv = jnp.linalg.pinv(cov_p)
+
+            a_t = cov_f @ f_t.T @ cov_inv
+            curr_mean_smooth = mean_f + a_t @ (mean_next - mean_p)
+            curr_cov_smooth = cov_f + a_t @ (cov_next - cov_p) @ a_t.T
+
+            return (curr_mean_smooth, curr_cov_smooth), (curr_mean_smooth, curr_cov_smooth)
+
+        carry_init = (filter_means[-1], filter_covs[-1])
+
+        num_timesteps = observations.shape[0]
+        time_inds = jnp.arange(num_timesteps)[:-1]
+
+        xs = (
+            time_inds,
+            filter_means[:-1],
+            filter_covs[:-1],
+            predicted_means[1:],
+            predicted_covs[1:],
+        )
+
+        _, (smoothed_means, smoothed_covariances) = lax.scan(rts_step, carry_init, xs, reverse=True)
+
+        smoothed_means = jnp.concatenate([smoothed_means, jnp.expand_dims(filter_means[-1], axis=0)], axis=0)
+        smoothed_covariances = jnp.concatenate([smoothed_covariances, jnp.expand_dims(filter_covs[-1], axis=0)], axis=0)
+
+        return SmoothingResult(smoothed_means, smoothed_covariances, ll)
+
+    def sample(self, rng_key: jax.random.PRNGKey, num_timesteps: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        Samples from the state-space model for num_timesteps.
+        """
+
+        def sample_step(carry, _):
+            t, x_prev, rng_prev = carry
+
+            f_t = self._get_transition_matrix(t, x_prev)
+            q_t = self._get_transition_cov(t)
+            b_t = self._get_transition_offset(t)
+            g_t = self._get_noise_transform(t)
+            h_t = self._get_observation_matrix(t)
+            r_t = self._get_observation_cov(t)
+            d_t = self._get_observation_offset(t)
+
+            rng_proc, rng_obs = jax.random.split(rng_prev)
+            noise_dim = q_t.shape[0]
+            w_t = dist.MultivariateNormal(loc=jnp.zeros(noise_dim), covariance_matrix=q_t).sample(rng_proc)
+
+            x_t = f_t @ x_prev + b_t + g_t @ w_t
+            obs_dim = r_t.shape[0]
+            v_t = dist.MultivariateNormal(loc=jnp.zeros(obs_dim), covariance_matrix=r_t).sample(rng_obs)
+
+            y_t = h_t @ x_t + d_t + v_t
+
+            return (t + 1, x_t, rng_proc), (x_t, y_t)
+
+        def init_state(key):
+            return dist.MultivariateNormal(loc=self.initial_mean, covariance_matrix=self.initial_cov).sample(key)
+
+        x0 = init_state(rng_key)
+        init_carry = (0, x0, rng_key)
+
+        _, (xs, ys) = lax.scan(sample_step, init_carry, None, length=num_timesteps)
+
+        return xs, ys
