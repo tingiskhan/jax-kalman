@@ -13,9 +13,9 @@ def random_key():
 
 
 def _simulate_data(true_params, rng_key, num_timesteps=30):
-    F = jnp.array([[true_params["F"]]])      # shape (1,1)
-    Q = jnp.array([[true_params["Q"]]])      # shape (1,1)
-    R = jnp.array([[true_params["R"]]])      # shape (1,1)
+    F = jnp.array([[true_params["F"]]])
+    Q = jnp.array([[true_params["Q"]]])
+    R = jnp.array([[true_params["R"]]])
 
     kf = KalmanFilter(
         initial_mean=jnp.array([true_params["initial_mean"]]),
