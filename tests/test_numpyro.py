@@ -41,10 +41,9 @@ def test_infer_state_space_parameters_with_numpyro(random_key):
     rng_key, data_key = jax.random.split(random_key)
     xs, ys = _simulate_data(true_params, data_key, num_timesteps=200)
 
-    def model(observations):
-        F = numpyro.sample("F", dist.Beta(2.0, 1.0))
-        Q = numpyro.sample("Q", dist.TransformedDistribution(dist.LogNormal(), dist.transforms.PowerTransform(2.0)))
 
+    @jax.jit
+    def filter_and_stuff(observations, F, Q):
         kf = KalmanFilter(
             initial_mean=jnp.array([true_params["initial_mean"]]),
             initial_cov=jnp.array([[true_params["initial_cov"]]]),
@@ -55,12 +54,21 @@ def test_infer_state_space_parameters_with_numpyro(random_key):
         )
 
         means, _, ll = kf.filter(observations)
+        return means, ll
+
+    def model(observations):
+        F = numpyro.sample("F", dist.Beta(2.0, 1.0))
+        Q = numpyro.sample("Q", dist.TransformedDistribution(dist.LogNormal(), dist.transforms.PowerTransform(2.0)))
+
+        means, ll = filter_and_stuff(observations, F, Q)
 
         numpyro.deterministic("x", means)
         numpyro.factor("kalman_likelihood", ll)
 
     kernel = NUTS(model)
     mcmc = MCMC(kernel, num_warmup=1_000, num_samples=500, num_chains=2, progress_bar=False)
+
+    ys = ys.at[10].set(jnp.nan)
 
     rng_key, mcmc_key = jax.random.split(rng_key)
     mcmc.run(mcmc_key, observations=ys)
