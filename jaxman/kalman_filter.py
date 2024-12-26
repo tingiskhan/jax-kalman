@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax import lax
 from jaxtyping import Array, Float
+from jax.tree_util import register_pytree_node_class
 
 from .results import FilterResult, SmoothingResult
 
@@ -31,6 +32,7 @@ def _inflate_missing(non_valid_mask: jnp.ndarray, r: jnp.ndarray, missing_value:
     return r_masked
 
 
+@register_pytree_node_class
 class KalmanFilter:
     """
     A JAX-based Kalman Filter supporting partial missing data, offsets, optional noise transform,
@@ -71,8 +73,8 @@ class KalmanFilter:
         self.observation_matrix = observation_matrix
         self.observation_cov = observation_cov
 
-        self.transition_offset = transition_offset
-        self.observation_offset = observation_offset
+        self.transition_offset = transition_offset if transition_offset is not None else jnp.zeros(1)
+        self.observation_offset = observation_offset if observation_offset is not None else jnp.zeros(1)
 
         if noise_transform is None:
             state_dim = initial_mean.shape[0]
@@ -80,6 +82,50 @@ class KalmanFilter:
 
         self.noise_transform = noise_transform
         self.variance_inflation = variance_inflation
+
+    def tree_flatten(self):
+        """
+        Splits the object into (children, aux_data).
+        children must be a tuple/list of JAX array leaves.
+        aux_data holds everything else needed to reconstruct the class.
+        """
+        children = (
+            self.initial_mean,
+            self.initial_cov,
+            self.transition_matrix,
+            self.transition_cov,
+            self.observation_matrix,
+            self.observation_cov,
+            self.transition_offset,
+            self.observation_offset,
+            self.noise_transform
+        )
+
+        aux_data = dict(
+            variance_inflation=self.variance_inflation
+        )
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+        Reconstructs the class instance from aux_data (static) + children (JAX arrays).
+        The order of children must match tree_flatten above.
+        """
+        initial_mean, initial_cov, transition_matrix, transition_cov, observation_matrix, observation_cov, transition_offset, observation_offset, noise_transform = children
+
+        return cls(
+            initial_mean=initial_mean,
+            initial_cov=initial_cov,
+            transition_matrix=transition_matrix,
+            transition_cov=transition_cov,
+            observation_matrix=observation_matrix,
+            observation_cov=observation_cov,
+            transition_offset=transition_offset,
+            observation_offset=observation_offset,
+            noise_transform=noise_transform,
+            **aux_data,
+        )
 
     def _get_transition_matrix(self, t: int, x_prev: jnp.ndarray) -> jnp.ndarray:
         if callable(self.transition_matrix):
@@ -106,18 +152,12 @@ class KalmanFilter:
         return self.observation_cov
 
     def _get_transition_offset(self, t: int) -> jnp.ndarray:
-        if self.transition_offset is None:
-            return jnp.zeros(1)
-
         if callable(self.transition_offset):
             return self.transition_offset(t)
 
         return self.transition_offset
 
     def _get_observation_offset(self, t: int) -> jnp.ndarray:
-        if self.observation_offset is None:
-            return jnp.zeros(1)
-
         if callable(self.observation_offset):
             return self.observation_offset(t)
 
