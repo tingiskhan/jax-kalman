@@ -98,12 +98,10 @@ class KalmanFilter:
             self.observation_cov,
             self.transition_offset,
             self.observation_offset,
-            self.noise_transform
+            self.noise_transform,
         )
 
-        aux_data = dict(
-            variance_inflation=self.variance_inflation
-        )
+        aux_data = dict(variance_inflation=self.variance_inflation)
         return children, aux_data
 
     @classmethod
@@ -112,7 +110,17 @@ class KalmanFilter:
         Reconstructs the class instance from aux_data (static) + children (JAX arrays).
         The order of children must match tree_flatten above.
         """
-        initial_mean, initial_cov, transition_matrix, transition_cov, observation_matrix, observation_cov, transition_offset, observation_offset, noise_transform = children
+        (
+            initial_mean,
+            initial_cov,
+            transition_matrix,
+            transition_cov,
+            observation_matrix,
+            observation_cov,
+            transition_offset,
+            observation_offset,
+            noise_transform,
+        ) = children
 
         return cls(
             initial_mean=initial_mean,
