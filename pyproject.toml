@@ -32,7 +32,11 @@ dev = [
     "pytest",
     "coverage",
     "bumpver",
+]
+
+test = [
     "pykalman",
+    "numpy<2.0",
 ]
 
 
