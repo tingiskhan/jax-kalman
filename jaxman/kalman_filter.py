@@ -144,18 +144,15 @@ class KalmanFilter:
         self,
         mean_pred: jnp.ndarray,
         cov_pred: jnp.ndarray,
-        obs_masked: jnp.ndarray,
-        h_masked: jnp.ndarray,
-        r_masked: jnp.ndarray,
+        obs_t: jnp.ndarray,
+        h: jnp.ndarray,
+        s_inverse: jnp.ndarray,
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        s = h_masked @ cov_pred @ h_masked.T + r_masked
-        s_inverse = jnp.linalg.pinv(s)
-
-        gain = cov_pred @ h_masked.T @ s_inverse
-        residual = obs_masked - h_masked @ mean_pred
+        gain = cov_pred @ h.T @ s_inverse
+        residual = obs_t - h @ mean_pred
 
         corrected_mean = mean_pred + gain @ residual
-        corrected_cov = cov_pred - gain @ h_masked @ cov_pred
+        corrected_cov = cov_pred - gain @ h @ cov_pred
 
         return corrected_mean, corrected_cov
 
@@ -172,18 +169,21 @@ class KalmanFilter:
             d_t = self._get_observation_offset(t)
 
             nan_mask = jnp.isnan(obs_t)
-            r_masked = _inflate_missing(nan_mask, r_t, self.variance_inflation)
+
+            # TODO: need to verify this...
+            r_t = _inflate_missing(nan_mask, r_t, missing_value=self.variance_inflation)
 
             y_pred_mean = h_t @ x_pred_mean + d_t
-            y_pred_cov = h_t @ x_pred_cov @ h_t.T + r_masked
+            y_pred_cov = h_t @ x_pred_cov @ h_t.T + r_t
 
             obs_masked = jnp.where(nan_mask, y_pred_mean, obs_t)
+            s_inv = jnp.linalg.pinv(y_pred_cov)
 
             dist_y = dist.MultivariateNormal(loc=y_pred_mean, covariance_matrix=y_pred_cov)
             step_log_prob = dist_y.log_prob(obs_masked)
             ll_t = ll_tm1 + step_log_prob
 
-            corrected_mean_t, corrected_cov_t = self._update(x_pred_mean, x_pred_cov, obs_masked, h_t, r_masked)
+            corrected_mean_t, corrected_cov_t = self._update(x_pred_mean, x_pred_cov, obs_masked, h_t, s_inv)
 
             carry_t = (t + 1, corrected_mean_t, corrected_cov_t, ll_t)
             return carry_t, (x_pred_mean, x_pred_cov, corrected_mean_t, corrected_cov_t)
