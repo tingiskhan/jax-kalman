@@ -1,10 +1,10 @@
-from typing import Any, Optional, Tuple
+from typing import Tuple
 
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax import lax
-from jaxtyping import Float, Array
+from jaxtyping import Array, Float
 
 from .results import FilterResult, SmoothingResult
 
@@ -52,15 +52,15 @@ class KalmanFilter:
 
     def __init__(
         self,
-        initial_mean: Float[Array, "state_dim"],
-        initial_cov: Float[Array, "state_dim state_dim"],
-        transition_matrix: Float[Array, "state_dim state_dim"],
-        transition_cov: Float[Array, "state_dim state_dim"],
-        observation_matrix: Float[Array, "obs_dim state_dim"],
-        observation_cov: Float[Array, "obs_dim obs_dim"],
-        transition_offset: Float[Array, "state_dim"] = None,
-        observation_offset: Float[Array, "obs_dim"] = None,
-        noise_transform: Float[Array, "state_dim noise_dim"] = None,
+        initial_mean: Float[Array, "state_dim"],  # noqa: 821
+        initial_cov: Float[Array, "state_dim state_dim"],  # noqa: F722
+        transition_matrix: Float[Array, "state_dim state_dim"],  # noqa: F722
+        transition_cov: Float[Array, "state_dim state_dim"],  # noqa: F722
+        observation_matrix: Float[Array, "obs_dim state_dim"],  # noqa: F722
+        observation_cov: Float[Array, "obs_dim obs_dim"],  # noqa: F722
+        transition_offset: Float[Array, "state_dim"] = None,  # noqa: F821
+        observation_offset: Float[Array, "obs_dim"] = None,  # noqa: F821
+        noise_transform: Float[Array, "state_dim noise_dim"] = None,  # noqa: F722
         variance_inflation: float = 1e6,
     ):
         self.initial_mean = initial_mean
