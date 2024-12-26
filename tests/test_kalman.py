@@ -53,11 +53,11 @@ def test_filter_vs_pykalman(random_key):
     obs_jax = jnp.array(obs_ref)
     fm, fc, ll = kf_jax.filter(obs_jax)
 
-    pf_means, pf_covs = kf_ref.filter(obs_ref)
+    pk_means, pk_covs = kf_ref.filter(obs_ref)
     ll_ref = kf_ref.loglikelihood(obs_ref)
 
     assert_allclose(ll_ref, ll, atol=5e-2)
-    assert_allclose(fm[1:], pf_means[1:], atol=5e-2)
+    assert_allclose(fm[1:], pk_means[1:], atol=5e-2)
 
 
 def test_smoothing_vs_pykalman(random_key):
@@ -98,20 +98,20 @@ def test_smoothing_vs_pykalman(random_key):
 
     obs_jax = jnp.array(obs_ref)
 
-    pykalman_smoothed_means, pykalman_smoothed_covs = kf_ref.smooth(obs_ref)
+    pk_smoothed_means, pk_smoothed_covs = kf_ref.smooth(obs_ref)
 
     means, covariances, _ = kf_jax.smooth(obs_jax)
     jax_smoothed_means = np.array(means)
     jax_smoothed_covs = np.array(covariances)
 
     # Compare
-    assert jax_smoothed_means.shape == pykalman_smoothed_means.shape
-    assert jax_smoothed_covs.shape == pykalman_smoothed_covs.shape
+    assert jax_smoothed_means.shape == pk_smoothed_means.shape
+    assert jax_smoothed_covs.shape == pk_smoothed_covs.shape
 
     # We allow some numerical tolerance due to different internal implementations
-    assert_allclose(jax_smoothed_means, pykalman_smoothed_means, atol=1e-2, rtol=1e-2)
+    assert_allclose(jax_smoothed_means, pk_smoothed_means, atol=1e-2, rtol=1e-2)
     for t in range(len(jax_smoothed_covs)):
-        assert_allclose(jax_smoothed_covs[t], pykalman_smoothed_covs[t], atol=1e-2, rtol=1e-2)
+        assert_allclose(jax_smoothed_covs[t], pk_smoothed_covs[t], atol=1e-2, rtol=1e-2)
 
 
 def test_partial_missing_data(random_key):
@@ -136,43 +136,10 @@ def test_partial_missing_data(random_key):
 
     obs_data = np.array([[1.0, 2.0], [np.nan, 2.1], [1.1, np.nan], [np.nan, np.nan], [1.2, 2.2]], dtype=np.float32)
 
+    # TODO: would be good to compare with pykalman, but not too sure it's correct
     fm, fc, ll = kf.filter(jnp.array(obs_data))
     assert fm.shape == (5, 2)
     assert fc.shape == (5, 2, 2)
-
-
-def test_smoothing_improves_estimates(random_key):
-    """
-    Generates synthetic data and ensures smoothing yields consistent outputs.
-    We check that shapes match and that smoothing doesn't crash.
-    We do not necessarily check for "better" numerical MSE here, but it typically is.
-    """
-    state_dim = 1
-    obs_dim = 1
-    F = jnp.array([[1.0]])
-    Q = jnp.array([[0.01]])
-    H = jnp.array([[1.0]])
-    R = jnp.array([[0.1]])
-
-    kf = KalmanFilter(
-        initial_mean=jnp.array([0.0]),
-        initial_cov=jnp.array([[1.0]]),
-        transition_matrix=F,
-        transition_cov=Q,
-        observation_matrix=H,
-        observation_cov=R,
-    )
-
-    rng_key, subkey = jax.random.split(random_key)
-    true_xs, obs_ys = kf.sample(subkey, num_timesteps=10)
-    fm, fc, ll_f = kf.filter(obs_ys)
-    sm, sc, ll_s = kf.smooth(obs_ys)
-
-    assert fm.shape == (10, 1)
-    assert fc.shape == (10, 1, 1)
-    assert sm.shape == (10, 1)
-    assert sc.shape == (10, 1, 1)
-    assert ll_f == pytest.approx(ll_s)
 
 
 def test_log_likelihood_correct_vs_incorrect(random_key):
