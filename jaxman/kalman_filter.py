@@ -61,7 +61,7 @@ class KalmanFilter:
         transition_offset: Float[Array, "state_dim"] = None,  # noqa: F821
         observation_offset: Float[Array, "obs_dim"] = None,  # noqa: F821
         noise_transform: Float[Array, "state_dim noise_dim"] = None,  # noqa: F722
-        variance_inflation: float = 1e6,
+        variance_inflation: float = 1e8,
     ):
         self.initial_mean = initial_mean
         self.initial_cov = initial_cov
