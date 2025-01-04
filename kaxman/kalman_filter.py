@@ -82,11 +82,6 @@ class KalmanFilter:
         self.variance_inflation = variance_inflation
 
     def tree_flatten(self):
-        """
-        Splits the object into (children, aux_data).
-        children must be a tuple/list of JAX array leaves.
-        aux_data holds everything else needed to reconstruct the class.
-        """
         children = (
             self.initial_mean,
             self.initial_cov,
@@ -104,10 +99,6 @@ class KalmanFilter:
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
-        """
-        Reconstructs the class instance from aux_data (static) + children (JAX arrays).
-        The order of children must match tree_flatten above.
-        """
         (
             initial_mean,
             initial_cov,
@@ -250,17 +241,14 @@ class KalmanFilter:
     # TODO: fix
     def smooth(self, observations: jnp.ndarray, missing_value: float = 1e12) -> SmoothingResult:
         """
-        Runs forward filtering + RTS backward pass for smoothing, returning SmoothResult(means, covariances, log_likelihood).
+        Runs forward filtering + RTS backward pass for smoothing, returning
+        SmoothResult(means, covariances, log_likelihood).
 
         The backward pass uses a reverse-time lax.scan to fill in smoothed results for each time step.
         """
         predicted_means, predicted_covs, filter_means, filter_covs, ll = self._forward_pass(observations)
 
         def rts_step(carry, aux_t):
-            """
-            carry: (mean_next, cov_next, smeans, scovs)
-            t_rev: the reversed time index, e.g. from T-2 down to 0
-            """
             mean_next, cov_next = carry
             t, mean_f, cov_f, mean_p, cov_p = aux_t
 
