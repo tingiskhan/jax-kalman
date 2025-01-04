@@ -304,7 +304,7 @@ class KalmanFilter:
             f_t = self._get_transition_matrix(t, x_prev)
             q_t = self._get_transition_cov(t)
             b_t = self._get_transition_offset(t)
-            g_t = self._get_noise_transform(t)
+            g_t = self.noise_transform
             h_t = self._get_observation_matrix(t)
             r_t = self._get_observation_cov(t)
             d_t = self._get_observation_offset(t)
