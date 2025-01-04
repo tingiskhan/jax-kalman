@@ -330,3 +330,6 @@ class KalmanFilter:
         _, (xs, ys) = lax.scan(sample_step, init_carry, None, length=num_timesteps)
 
         return xs, ys
+
+
+__all__ = ["KalmanFilter"]
