@@ -1,13 +1,22 @@
 # About the project
-jaxman is yet another library that implements the [Kalman filter](https://en.wikipedia.org/wiki/Kalman_filter). This library is mainly intended as a self-study project in which to learn to [JAX](https://github.com/google/jax). The implementation is inspired by both [pykalman](https://pykalman.github.io/) and [simdkalman](https://github.com/oseiskar/simdkalman), and like simdkalman implements support for vectorized inference across multiple timeseries. As it's implemented in JAX and utilizes its JIT capabilities, we achieve blazing fast inference for 1,000s (sometimes even 100,000s) of parallel timeseries.
+kaxman is yet another library that implements the [Kalman filter](https://en.wikipedia.org/wiki/Kalman_filter). The 
+library is built on top of JAX and is designed to be fast and efficient. The library is still in its early stages and
+is not yet feature complete. Some of the features include:
+- JIT:able Kalman filter class.
+- Support for fully/partially missing observations via inflation of variance.
+- Support for time-varying state transition and observation matrices.
+- Support for time-varying process and observation noise covariance matrices.
+- Support for noise transform, e.g. having the same noise for multiple states.
+- Rauch-Tung-Striebel smoother.
+
 
 # Getting started
-Follow the below instructions in order to get started with jaxman.
+Follow the below instructions in order to get started with kaxman.
 
 ## Installation
-The library is currently not available on pypi, and there are currently no plans on releasing it there, so install it via
+The library is currently not available on pypi, so install it via
 ```
-https://github.com/tingiskhan/jaxman
+https://github.com/tingiskhan/kaxman
 ```
 
 # Usage
