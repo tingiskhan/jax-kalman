@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 from numpy.testing import assert_allclose
 from pykalman import KalmanFilter as PyKalman
-from jaxman import KalmanFilter
+from kaxman import KalmanFilter
 
 
 @pytest.fixture

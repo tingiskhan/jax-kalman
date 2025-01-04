@@ -12,7 +12,7 @@ from .results import FilterResult, SmoothingResult
 
 def _inflate_missing(non_valid_mask: jnp.ndarray, r: jnp.ndarray, missing_value: float = 1e12) -> jnp.ndarray:
     """
-    Masks missing dimensions by zeroing corresponding rows of H and inflating the diagonal of R.
+    Masks missing dimensions by inflating the diagonal of R.
 
     Args:
         non_valid_mask: Boolean mask of shape (obs_dim,) indicating missing dimensions.
@@ -21,8 +21,6 @@ def _inflate_missing(non_valid_mask: jnp.ndarray, r: jnp.ndarray, missing_value:
 
     Returns:
         A tuple of:
-          - obs_masked: Same shape as obs, with missing entries replaced by 0.0.
-          - H_masked: Same shape as H, rows zeroed out for missing dimensions.
           - r_masked: Same shape as R, diagonal entries inflated for missing dimensions.
     """
 
@@ -171,20 +169,14 @@ class KalmanFilter:
 
         return self.observation_offset
 
-    def _get_noise_transform(self, t: int) -> jnp.ndarray:
-        if callable(self.noise_transform):
-            return self.noise_transform(t)
-
-        return self.noise_transform
-
     def _predict(self, mean: jnp.ndarray, cov: jnp.ndarray, t: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        F_t = self._get_transition_matrix(t, mean)
-        Q_t = self._get_transition_cov(t)
+        f_t = self._get_transition_matrix(t, mean)
+        q_t = self._get_transition_cov(t)
         b_t = self._get_transition_offset(t)
-        G_t = self._get_noise_transform(t)
+        g_t = self.noise_transform
 
-        mean_pred = F_t @ mean + b_t
-        cov_pred = F_t @ cov @ F_t.T + G_t @ Q_t @ G_t.T
+        mean_pred = f_t @ mean + b_t
+        cov_pred = f_t @ cov @ f_t.T + g_t @ q_t @ g_t.T
 
         return mean_pred, cov_pred
 
