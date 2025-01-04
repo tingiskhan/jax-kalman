@@ -10,21 +10,21 @@ from jaxtyping import Array, Float
 from .results import FilterResult, SmoothingResult
 
 
-def _inflate_missing(non_valid_mask: jnp.ndarray, r: jnp.ndarray, missing_value: float = 1e12) -> jnp.ndarray:
+def _inflate_missing(non_valid_mask: jnp.ndarray, r: jnp.ndarray, inflation: float = 1e12) -> jnp.ndarray:
     """
     Masks missing dimensions by inflating the diagonal of R.
 
     Args:
         non_valid_mask: Boolean mask of shape (obs_dim,) indicating missing dimensions.
         r: Observation covariance matrix of shape (obs_dim, obs_dim).
-        missing_value: Large scalar to add on the diagonal for missing dimensions.
+        inflation: Large scalar to add on the diagonal for missing dimensions.
 
     Returns:
         A tuple of:
           - r_masked: Same shape as R, diagonal entries inflated for missing dimensions.
     """
 
-    diag_inflation = jnp.where(non_valid_mask, missing_value, 0.0)
+    diag_inflation = jnp.where(non_valid_mask, inflation, 0.0)
     r_masked = r + jnp.diag(diag_inflation)
 
     return r_masked
@@ -211,7 +211,7 @@ class KalmanFilter:
             nan_mask = jnp.isnan(obs_t)
 
             # TODO: need to verify this...
-            r_t = _inflate_missing(nan_mask, r_t, missing_value=self.variance_inflation)
+            r_t = _inflate_missing(nan_mask, r_t, inflation=self.variance_inflation)
 
             y_pred_mean = h_t @ x_pred_mean + d_t
             y_pred_cov = h_t @ x_pred_cov @ h_t.T + r_t
