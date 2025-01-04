@@ -2,7 +2,7 @@
 # GLOBALS                                                                       #
 #################################################################################
 
-PROJECT_NAME = jaxman
+PROJECT_NAME = kaxman
 PYTHON_VERSION = 3.10
 PYTHON_INTERPRETER = python
 

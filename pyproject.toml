@@ -42,7 +42,7 @@ test = [
 
 
 [tool.setuptools.packages.find]
-include = ["jaxman*"]
+include = ["kaxman*"]
 
 [tool.black]
 line-length = 120
@@ -58,7 +58,7 @@ exclude = '''
 line-length = 120
 
 [tool.bumpver]
-current_version = "0.1.0"
+current_version = "0.2.0"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "bump version {old_version} -> {new_version}"
 commit = true
@@ -72,12 +72,12 @@ tag_scope = "default"
     'current_version = "{version}"',
 ]
 
-"jaxman/__init__.py" = [
+"kaxman/__init__.py" = [
     '__version__ = "{version}"'
 ]
 
 [tool.setuptools.dynamic]
-version = {attr = "jaxman.__version__"}
+version = {attr = "kaxman.__version__"}
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

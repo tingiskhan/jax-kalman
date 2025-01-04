@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
-from jaxman import KalmanFilter
+from kaxman import KalmanFilter
 
 
 @pytest.fixture
